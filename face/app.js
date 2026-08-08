@@ -98,6 +98,7 @@ let jointSpitAt = 0;
 let jointDropping = false;
 let jointDropVelocity = 0;
 let jointDropBounces = 0;
+let jointDropSettling = false;
 const jointSpitVelocity = new THREE.Vector3();
 let alteredFace = null;
 let alteredFaceOpacity = 0;
@@ -903,6 +904,7 @@ function beginDrag(event) {
     const jointHit = raycaster.intersectObject(jointRoot, true)[0];
     if (jointHit) {
       event.preventDefault();
+      jointDropSettling = false;
       if (jointSnapped) detachJoint();
       activePointer = event.pointerId;
       canvas.setPointerCapture(event.pointerId);
@@ -1040,7 +1042,7 @@ function emitHeadwearPoof(headwearRoot) {
   modelPivot.updateMatrixWorld(true);
   // One reliable attachment point at the top-front of Jackhachi's skull.
   // It follows the head pivot, independent of accessory shape or trailing cloth.
-  const centre = modelPivot.localToWorld(new THREE.Vector3(-0.11, 0.40, 0.48));
+  const centre = modelPivot.localToWorld(new THREE.Vector3(-0.14, 0.40, 0.48));
   const smokeType = headwearRoot === duragRoot ? 'durag' : 'bandana';
   for (let i = 0; i < 30; i++) {
     // Jump around the circle instead of drawing it clockwise, so even the
@@ -1065,6 +1067,7 @@ function toggleJointItem() {
   }
   jointRoot.visible = true;
   jointDropping = true;
+  jointDropSettling = false;
   jointDropVelocity = 0;
   jointDropBounces = 0;
   jointRoot.position.set(JOINT_LOOSE_POSITION.x, 1.65, JOINT_LOOSE_POSITION.z);
@@ -1163,6 +1166,7 @@ function returnFreshJoint() {
   }
   smokedFraction = 0;
   jointSpitting = false;
+  jointDropSettling = false;
   jointSpitAt = 0;
   jointTip.position.x = JOINT_CONTACT_X + JOINT_FULL_LENGTH;
   jointRoot.visible = true;
@@ -1193,7 +1197,8 @@ function emitSmokeAtWorld(worldPoint, fromNose, heavy = false, sizeMultiplier = 
   const drift = Math.round(Math.random() * (fromNose ? 44 : 70) - (fromNose ? 22 : 35));
   const baseSize = (fromNose ? 30 : heavy ? 31 : 22) + Math.round(Math.random() * 13);
   puff.style.setProperty('--smoke-size', `${baseSize * sizeMultiplier}px`);
-  puff.style.setProperty('--smoke-life', `${(fromNose ? 3.5 : 2.8) + Math.random() * 1.25}s`);
+  const life = (fromNose ? 3.5 : 2.8) + Math.random() * 1.25;
+  puff.style.setProperty('--smoke-life', `${headwearType ? life * 0.7 : life}s`);
   puff.style.setProperty('--smoke-drift', `${drift}px`);
   puff.style.setProperty('--smoke-drift-end', `${drift + Math.round(Math.random() * 50 - 25)}px`);
   puff.style.setProperty('--smoke-turn', `${Math.round(Math.random() * 34 - 17)}deg`);
@@ -1329,11 +1334,25 @@ function animate() {
         jointDropVelocity = Math.abs(jointDropVelocity) * 0.48;
         jointDropBounces += 1;
       } else {
-        jointRoot.rotation.set(0, 0, JOINT_LOOSE_ROTATION);
         jointDropping = false;
+        jointDropSettling = true;
         jointDropVelocity = 0;
         jointDropBounces = 0;
       }
+    }
+  }
+
+  if (jointDropSettling && jointRoot) {
+    jointRoot.rotation.x = THREE.MathUtils.damp(jointRoot.rotation.x, 0, 9, dt);
+    jointRoot.rotation.y = THREE.MathUtils.damp(jointRoot.rotation.y, 0, 9, dt);
+    jointRoot.rotation.z = THREE.MathUtils.damp(jointRoot.rotation.z, JOINT_LOOSE_ROTATION, 9, dt);
+    if (
+      Math.abs(jointRoot.rotation.x) < 0.003 &&
+      Math.abs(jointRoot.rotation.y) < 0.003 &&
+      Math.abs(jointRoot.rotation.z - JOINT_LOOSE_ROTATION) < 0.003
+    ) {
+      jointRoot.rotation.set(0, 0, JOINT_LOOSE_ROTATION);
+      jointDropSettling = false;
     }
   }
 

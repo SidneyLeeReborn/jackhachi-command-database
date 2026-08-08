@@ -234,9 +234,9 @@ footer { color: #ff9cf5; font-size: 12px; font-weight: bold; }
 }
 
 @keyframes headwear-smoke {
-  0% { opacity: 0; transform: translate(0, 0) scale(.35) rotate(0deg); }
-  13% { opacity: .28; }
-  55% { opacity: .19; transform: translate(var(--smoke-drift), -34px) scale(1.18) rotate(var(--smoke-turn)); }
+  0% { opacity: .5; transform: translate(0, 0) scale(.35) rotate(0deg); }
+  20% { opacity: .4; }
+  55% { opacity: .2; transform: translate(var(--smoke-drift), -34px) scale(1.18) rotate(var(--smoke-turn)); }
   100% { opacity: 0; transform: translate(var(--smoke-drift-end), -88px) scale(2.15) rotate(var(--smoke-turn-end)); }
 }
 
