@@ -95,6 +95,7 @@ let headPitch = 0;
 let duragRoot = null;
 let duragEquipped = false;
 let idleTime = 0;
+let entranceTime = 0;
 let groanContext = null;
 let groanBuffer = null;
 let groanOriginalBuffer = null;
@@ -116,6 +117,7 @@ const JOINT_SCALE = 7;
 const JOINT_LOOSE_POSITION = new THREE.Vector3(-0.56, -0.43, 0.92);
 const JOINT_LOOSE_ROTATION = THREE.MathUtils.degToRad(-8);
 const ALTERED_FACE_DELAY = 4000;
+const ALTERED_FACE_MAX_TIME = 10000;
 const ALTERED_FACE_FADE_IN = 60000;
 const ALTERED_FACE_FADE_OUT = 3000;
 const SMILE_FADE_IN = 60000;
@@ -786,11 +788,13 @@ function snapJointToHeadSurface() {
   if (!jointRoot || !jointContact || !modelPivot || !head || !positions) return;
   const contactWorld = jointContact.getWorldPosition(new THREE.Vector3());
   const targetLocal = head.worldToLocal(contactWorld.clone());
-  const mouthLocal = head.worldToLocal(modelPivot.localToWorld(new THREE.Vector3(0, -0.45, 0.50)));
+  const mouthLocal = head.worldToLocal(modelPivot.localToWorld(new THREE.Vector3(0, -0.52, 0.52)));
   let nearestDistance = Infinity;
   for (let i = 0; i < positions.count; i++) {
     tempVertex.fromArray(positions.array, i * 3);
-    if (tempVertex.distanceToSquared(mouthLocal) > 0.34 * 0.34) continue;
+    // Only lip/mouth vertices are legal anchors. This prevents the broad
+    // contact tolerance from accepting the nose before reaching the mouth.
+    if (tempVertex.distanceToSquared(mouthLocal) > 0.22 * 0.22) continue;
     const distance = tempVertex.distanceToSquared(targetLocal);
     if (distance < nearestDistance) {
       nearestDistance = distance;
@@ -943,6 +947,7 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 1 / 30);
   const now = performance.now();
   idleTime += dt;
+  entranceTime += dt;
 
   if (jointDropping && jointRoot) {
     jointDropVelocity -= 4.8 * dt;
@@ -963,7 +968,10 @@ function animate() {
     jointRoot.position.copy(tempVertex).add(jointSnapOffset);
   }
 
-  const alteredTarget = jointSnapped && now - jointSnappedAt >= ALTERED_FACE_DELAY ? 1 : 0;
+  const jointFaceAge = now - jointSnappedAt;
+  const alteredTarget = jointSnapped &&
+    jointFaceAge >= ALTERED_FACE_DELAY &&
+    jointFaceAge < ALTERED_FACE_MAX_TIME ? 1 : 0;
   const alteredDuration = alteredTarget > alteredFaceOpacity ? ALTERED_FACE_FADE_IN : ALTERED_FACE_FADE_OUT;
   alteredFaceOpacity = THREE.MathUtils.clamp(
     alteredFaceOpacity + Math.sign(alteredTarget - alteredFaceOpacity) * dt / (alteredDuration / 1000),
@@ -993,6 +1001,17 @@ function animate() {
     modelPivot.rotation.z = (Math.sin(idleTime * 1.05) * 0.012 + Math.sin(idleTime * 0.43 + 1.8) * 0.005) * idleStrength;
     modelPivot.rotation.x = headPitch + (Math.sin(idleTime * 0.72 + 0.6) * 0.006) * idleStrength;
     modelPivot.position.y = 0.080 + Math.sin(idleTime * 0.92) * 0.010 * idleStrength;
+
+    // Squashy late-90s blob entrance: rapidly grows in, overshoots, then
+    // settles into the normal idle motion without hiding interactivity.
+    const entrance = THREE.MathUtils.clamp(entranceTime / 1.65, 0, 1);
+    const baseScale = entrance === 1 ? 1 : 1 - Math.exp(-5.2 * entrance) * Math.cos(entrance * Math.PI * 5.5);
+    const wobble = entrance === 1 ? 0 : Math.sin(entrance * Math.PI * 7) * (1 - entrance) * 0.22;
+    modelPivot.scale.set(
+      Math.max(0.01, baseScale * (1 + wobble)),
+      Math.max(0.01, baseScale * (1 - wobble * 0.78)),
+      Math.max(0.01, baseScale * (1 + wobble * 0.18))
+    );
   }
 
   if (jointSnapped && jointVisual && jointTip) {
