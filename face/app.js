@@ -307,7 +307,7 @@ new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(
 );
 
 new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(
-  './sidney-bandana.glb?v=1',
+  './sidney-bandana.glb?v=2',
   (gltf) => {
     bandanaRoot = new THREE.Group();
     bandanaRoot.name = 'SIDNEY_BANDANA';
