@@ -120,6 +120,9 @@ let paintEraseMode = false;
 let previousPaintPoint = null;
 let activePaintErase = false;
 let activePaintOpacity = 1;
+let paintDirtyBounds = null;
+let paintTextureUpdateQueued = false;
+let paintStampKey = '';
 const paintBaseCanvas = document.createElement('canvas');
 const paintStrokeCanvas = document.createElement('canvas');
 const paintStampCanvas = document.createElement('canvas');
@@ -158,7 +161,8 @@ const JOINT_CONTACT_X = -0.0393;
 const JOINT_MIN_SCALE_X = 0.08;
 const INHALE_CYCLE = 8000;
 const GROAN_DRAG_DELAY = 500;
-const PAINT_TEXTURE_SIZE = 2048;
+const PAINT_TEXTURE_SIZE = 1024;
+const PAINT_SIZE_SCALE = PAINT_TEXTURE_SIZE / 2048;
 
 // Mouse placement should feel physical without demanding pixel-perfect contact.
 // This is measured from the joint's mouth end to the nearest head vertex.
@@ -378,7 +382,9 @@ function setupPaintLayer() {
   paintStrokeContext = paintStrokeCanvas.getContext('2d');
   paintTexture = new THREE.CanvasTexture(paintCanvas);
   paintTexture.colorSpace = THREE.SRGBColorSpace;
-  paintTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  paintTexture.generateMipmaps = false;
+  paintTexture.minFilter = THREE.LinearFilter;
+  paintTexture.magFilter = THREE.LinearFilter;
 
   const paintMaterial = new THREE.MeshBasicMaterial({
     map: paintTexture,
@@ -413,6 +419,9 @@ function paintBlockerIsCloser(headHit) {
 }
 
 function buildPaintStamp(width) {
+  const nextKey = `${width}|${paintHardness.value}|${paintColour.value}|${activePaintErase}`;
+  if (paintStampKey === nextKey) return paintStampCanvas.width;
+  paintStampKey = nextKey;
   const stampSize = Math.max(4, Math.ceil(width + 4));
   paintStampCanvas.width = stampSize;
   paintStampCanvas.height = stampSize;
@@ -433,36 +442,71 @@ function buildPaintStamp(width) {
 
 function stampPaint(point, width, stampSize) {
   paintStrokeContext.drawImage(paintStampCanvas, point.x - stampSize * 0.5, point.y - stampSize * 0.5);
+  const half = stampSize * 0.5 + 2;
+  if (!paintDirtyBounds) {
+    paintDirtyBounds = { minX: point.x - half, minY: point.y - half, maxX: point.x + half, maxY: point.y + half };
+  } else {
+    paintDirtyBounds.minX = Math.min(paintDirtyBounds.minX, point.x - half);
+    paintDirtyBounds.minY = Math.min(paintDirtyBounds.minY, point.y - half);
+    paintDirtyBounds.maxX = Math.max(paintDirtyBounds.maxX, point.x + half);
+    paintDirtyBounds.maxY = Math.max(paintDirtyBounds.maxY, point.y + half);
+  }
+}
+
+function getPaintDirtyRect() {
+  if (!paintDirtyBounds) return null;
+  const x = Math.max(0, Math.floor(paintDirtyBounds.minX));
+  const y = Math.max(0, Math.floor(paintDirtyBounds.minY));
+  const right = Math.min(PAINT_TEXTURE_SIZE, Math.ceil(paintDirtyBounds.maxX));
+  const bottom = Math.min(PAINT_TEXTURE_SIZE, Math.ceil(paintDirtyBounds.maxY));
+  return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
+}
+
+function queuePaintTextureUpdate() {
+  if (paintTextureUpdateQueued) return;
+  paintTextureUpdateQueued = true;
+  requestAnimationFrame(() => {
+    paintTextureUpdateQueued = false;
+    if (paintTexture) paintTexture.needsUpdate = true;
+  });
 }
 
 function renderPaintComposite(showActiveStroke = true) {
-  paintContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
-  paintContext.drawImage(paintBaseCanvas, 0, 0);
+  const dirty = getPaintDirtyRect();
+  if (!dirty || dirty.width === 0 || dirty.height === 0) return;
+  const { x, y, width, height } = dirty;
+  paintContext.clearRect(x, y, width, height);
+  paintContext.drawImage(paintBaseCanvas, x, y, width, height, x, y, width, height);
   if (showActiveStroke) {
     paintContext.save();
     paintContext.globalCompositeOperation = activePaintErase ? 'destination-out' : 'source-over';
     paintContext.globalAlpha = activePaintOpacity;
-    paintContext.drawImage(paintStrokeCanvas, 0, 0);
+    paintContext.drawImage(paintStrokeCanvas, x, y, width, height, x, y, width, height);
     paintContext.restore();
   }
-  paintTexture.needsUpdate = true;
+  queuePaintTextureUpdate();
 }
 
 function beginPaintStroke() {
   paintStrokeContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
   activePaintErase = paintEraseMode;
   activePaintOpacity = Number(paintOpacity.value) / 100;
+  paintDirtyBounds = null;
   previousPaintPoint = null;
 }
 
 function commitPaintStroke() {
+  const dirty = getPaintDirtyRect();
+  if (!dirty) return;
+  const { x, y, width, height } = dirty;
   paintBaseContext.save();
   paintBaseContext.globalCompositeOperation = activePaintErase ? 'destination-out' : 'source-over';
   paintBaseContext.globalAlpha = activePaintOpacity;
-  paintBaseContext.drawImage(paintStrokeCanvas, 0, 0);
+  paintBaseContext.drawImage(paintStrokeCanvas, x, y, width, height, x, y, width, height);
   paintBaseContext.restore();
-  paintStrokeContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
+  paintStrokeContext.clearRect(x, y, width, height);
   renderPaintComposite(false);
+  paintDirtyBounds = null;
 }
 
 function paintAtPointer() {
@@ -476,11 +520,11 @@ function paintAtPointer() {
     x: hit.uv.x * PAINT_TEXTURE_SIZE,
     y: (1 - hit.uv.y) * PAINT_TEXTURE_SIZE
   };
-  const width = Number(paintSize.value || 24);
+  const width = Number(paintSize.value || 24) * PAINT_SIZE_SCALE;
   const stampSize = buildPaintStamp(width);
   if (previousPaintPoint && Math.hypot(point.x - previousPaintPoint.x, point.y - previousPaintPoint.y) < PAINT_TEXTURE_SIZE * 0.16) {
     const distance = Math.hypot(point.x - previousPaintPoint.x, point.y - previousPaintPoint.y);
-    const steps = Math.max(1, Math.ceil(distance / Math.max(1, width * 0.12)));
+    const steps = Math.max(1, Math.ceil(distance / Math.max(1, width * 0.22)));
     for (let step = 1; step <= steps; step++) {
       const t = step / steps;
       stampPaint({
@@ -995,7 +1039,7 @@ function emitHeadwearPoof(headwearRoot) {
   modelPivot.updateMatrixWorld(true);
   // One reliable attachment point at the top-front of Jackhachi's skull.
   // It follows the head pivot, independent of accessory shape or trailing cloth.
-  const centre = modelPivot.localToWorld(new THREE.Vector3(0, 0.40, 0.48));
+  const centre = modelPivot.localToWorld(new THREE.Vector3(-0.07, 0.40, 0.48));
   for (let i = 0; i < 30; i++) {
     // Jump around the circle instead of drawing it clockwise, so even the
     // first few delayed puffs form one centred cloud.
@@ -1257,7 +1301,8 @@ paintClear.addEventListener('click', () => {
   paintBaseContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
   paintStrokeContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
   paintContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
-  paintTexture.needsUpdate = true;
+  paintDirtyBounds = null;
+  queuePaintTextureUpdate();
 });
 
 const clock = new THREE.Clock();
