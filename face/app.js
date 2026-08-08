@@ -8,6 +8,7 @@ const loading = document.querySelector('#loading');
 const resetButton = document.querySelector('#reset');
 const smokeLayer = document.querySelector('#smoke-layer');
 const duragButton = document.querySelector('#durag-toggle');
+const bandanaButton = document.querySelector('#bandana-toggle');
 const jointButton = document.querySelector('#joint-toggle');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -94,6 +95,8 @@ let turnAngle = 0;
 let headPitch = 0;
 let duragRoot = null;
 let duragEquipped = false;
+let bandanaRoot = null;
+let bandanaEquipped = false;
 let idleTime = 0;
 let entranceTime = 0;
 let fullFaceRecoveryAt = 0;
@@ -301,6 +304,25 @@ new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(
   },
   undefined,
   (error) => console.error('Durag load failure', error)
+);
+
+new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).load(
+  './sidney-bandana.glb?v=1',
+  (gltf) => {
+    bandanaRoot = new THREE.Group();
+    bandanaRoot.name = 'SIDNEY_BANDANA';
+    bandanaRoot.add(gltf.scene);
+    bandanaRoot.visible = false;
+    gltf.scene.traverse((object) => {
+      if (!object.isMesh) return;
+      object.renderOrder = 96;
+      object.frustumCulled = false;
+    });
+    scene.add(bandanaRoot);
+    bandanaButton.disabled = false;
+  },
+  undefined,
+  (error) => console.error('Sidney bandana load failure', error)
 );
 
 function setPointer(event) {
@@ -741,6 +763,7 @@ function endDrag(event) {
 
 function equipDurag() {
   if (!duragRoot || !modelPivot) return;
+  detachBandana();
   modelPivot.attach(duragRoot);
   duragRoot.position.set(0, 0, 0);
   duragRoot.rotation.set(0, 0, 0);
@@ -749,6 +772,20 @@ function equipDurag() {
   duragEquipped = true;
   duragButton.setAttribute('aria-pressed', 'true');
   duragButton.title = 'Remove durag';
+  emitDuragPoof();
+}
+
+function equipBandana() {
+  if (!bandanaRoot || !modelPivot) return;
+  detachDurag();
+  modelPivot.attach(bandanaRoot);
+  bandanaRoot.position.set(0, 0, 0);
+  bandanaRoot.rotation.set(0, 0, 0);
+  bandanaRoot.scale.setScalar(1);
+  bandanaRoot.visible = true;
+  bandanaEquipped = true;
+  bandanaButton.setAttribute('aria-pressed', 'true');
+  bandanaButton.title = 'Remove Sidney bandana';
   emitDuragPoof();
 }
 
@@ -784,6 +821,14 @@ function detachDurag() {
   duragEquipped = false;
   duragButton.setAttribute('aria-pressed', 'false');
   duragButton.title = 'Equip durag';
+}
+
+function detachBandana() {
+  if (!bandanaRoot || !bandanaEquipped) return;
+  bandanaRoot.visible = false;
+  bandanaEquipped = false;
+  bandanaButton.setAttribute('aria-pressed', 'false');
+  bandanaButton.title = 'Equip Sidney bandana';
 }
 
 function snapJointToHeadSurface() {
@@ -940,6 +985,10 @@ jointButton.addEventListener('click', toggleJointItem);
 duragButton.addEventListener('click', () => {
   if (duragEquipped) detachDurag();
   else equipDurag();
+});
+bandanaButton.addEventListener('click', () => {
+  if (bandanaEquipped) detachBandana();
+  else equipBandana();
 });
 
 const clock = new THREE.Clock();
