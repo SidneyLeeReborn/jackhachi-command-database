@@ -1152,7 +1152,7 @@ function spitFinishedJoint(now) {
   jointSpitVelocity.set(0.48, -0.16, 0.12);
 }
 
-function returnFreshJoint() {
+function retireFinishedJoint() {
   if (!jointRoot || !jointVisual) return;
   scene.attach(jointRoot);
   jointRoot.position.copy(JOINT_LOOSE_POSITION);
@@ -1169,8 +1169,8 @@ function returnFreshJoint() {
   jointDropSettling = false;
   jointSpitAt = 0;
   jointTip.position.x = JOINT_CONTACT_X + JOINT_FULL_LENGTH;
-  jointRoot.visible = true;
-  jointButton.setAttribute('aria-pressed', 'true');
+  jointRoot.visible = false;
+  jointButton.setAttribute('aria-pressed', 'false');
 }
 
 function emitTerribleSmoke(heavy = false) {
@@ -1453,7 +1453,7 @@ function animate() {
     jointRoot.position.addScaledVector(jointSpitVelocity, dt);
     jointRoot.rotation.z -= 5.6 * dt;
     jointRoot.rotation.x += 2.2 * dt;
-    if (now - jointSpitAt > 1450) returnFreshJoint();
+    if (now - jointSpitAt > 1450) retireFinishedJoint();
   }
 
   if (positions && fullFaceRecoveryAt && now >= fullFaceRecoveryAt && dragMode !== 'face') {
