@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Jackhachi Face Calibration</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <main class="machine">
+    <section id="face-stage" aria-label="Interactive 3D Jackhachi face">
+      <div id="loading">LOADING INDUSTRIAL FACE...</div>
+      <canvas id="face-canvas"></canvas>
+      <div id="smoke-layer" aria-hidden="true"></div>
+      <button id="joint-toggle" class="item-button joint-button" type="button" aria-pressed="false" title="Drop joint" disabled>
+        <span class="joint-button-icon" aria-hidden="true"></span>
+        <span>JOINT</span>
+      </button>
+      <button id="durag-toggle" class="item-button" type="button" aria-pressed="false" title="Equip durag" disabled>
+        <img src="./durag-icon.png" alt="Equip Jackhachi's durag">
+        <span>DURAG</span>
+      </button>
+    </section>
+
+    <div class="controls">
+      <a href="../">&lt;&lt; RETURN TO COMMAND DATABASE</a>
+    </div>
+
+    <footer>WARNING: EXCESSIVE FACE MANIPULATION MAY VOID MISHIMA WARRANTY.</footer>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
