@@ -10,6 +10,12 @@ const smokeLayer = document.querySelector('#smoke-layer');
 const duragButton = document.querySelector('#durag-toggle');
 const bandanaButton = document.querySelector('#bandana-toggle');
 const jointButton = document.querySelector('#joint-toggle');
+const paintToggle = document.querySelector('#paint-toggle');
+const paintOptions = document.querySelector('#paint-options');
+const paintColour = document.querySelector('#paint-colour');
+const paintSize = document.querySelector('#paint-size');
+const paintEraser = document.querySelector('#paint-eraser');
+const paintClear = document.querySelector('#paint-clear');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
@@ -97,6 +103,12 @@ let duragRoot = null;
 let duragEquipped = false;
 let bandanaRoot = null;
 let bandanaEquipped = false;
+let paintLayer = null;
+let paintTexture = null;
+let paintContext = null;
+let paintMode = false;
+let paintEraseMode = false;
+let previousPaintPoint = null;
 let idleTime = 0;
 let entranceTime = 0;
 let fullFaceRecoveryAt = 0;
@@ -131,6 +143,7 @@ const JOINT_CONTACT_X = -0.0393;
 const JOINT_MIN_SCALE_X = 0.08;
 const INHALE_CYCLE = 8000;
 const GROAN_DRAG_DELAY = 500;
+const PAINT_TEXTURE_SIZE = 2048;
 
 // Mouse placement should feel physical without demanding pixel-perfect contact.
 // This is measured from the joint's mouth end to the nearest head vertex.
@@ -169,6 +182,7 @@ new GLTFLoader().load(
     modelPivot.updateMatrixWorld(true);
     buildSmileMap();
     buildStonerMap();
+    setupPaintLayer();
 
     Promise.all([
       textureLoader.loadAsync('./shaded2.png?v=1'),
@@ -329,6 +343,82 @@ function setPointer(event) {
   const rect = canvas.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+}
+
+function setupPaintLayer() {
+  const paintCanvas = document.createElement('canvas');
+  paintCanvas.width = PAINT_TEXTURE_SIZE;
+  paintCanvas.height = PAINT_TEXTURE_SIZE;
+  paintContext = paintCanvas.getContext('2d');
+  paintTexture = new THREE.CanvasTexture(paintCanvas);
+  paintTexture.colorSpace = THREE.SRGBColorSpace;
+  paintTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+  const paintMaterial = new THREE.MeshBasicMaterial({
+    map: paintTexture,
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2
+  });
+  paintLayer = head.clone(false);
+  paintLayer.name = 'JACKHACHI_PAINT_LAYER';
+  paintLayer.geometry = head.geometry;
+  paintLayer.material = paintMaterial;
+  paintLayer.position.copy(head.position);
+  paintLayer.rotation.copy(head.rotation);
+  paintLayer.scale.copy(head.scale);
+  paintLayer.renderOrder = head.renderOrder + 2;
+  paintLayer.frustumCulled = false;
+  head.parent.add(paintLayer);
+}
+
+function paintBlockerIsCloser(headHit) {
+  const blockers = [];
+  if (jointRoot?.visible) blockers.push(jointRoot);
+  if (duragRoot?.visible) blockers.push(duragRoot);
+  if (bandanaRoot?.visible) blockers.push(bandanaRoot);
+  for (const eye of pupils) blockers.push(eye.group);
+  if (!blockers.length) return false;
+  const blockerHit = raycaster.intersectObjects(blockers, true)[0];
+  return Boolean(blockerHit && blockerHit.distance <= headHit.distance + 0.002);
+}
+
+function paintAtPointer() {
+  if (!paintContext || !paintTexture || !head) return false;
+  const hit = raycaster.intersectObject(head, false)[0];
+  if (!hit?.uv || paintBlockerIsCloser(hit)) {
+    previousPaintPoint = null;
+    return false;
+  }
+  const point = {
+    x: hit.uv.x * PAINT_TEXTURE_SIZE,
+    y: (1 - hit.uv.y) * PAINT_TEXTURE_SIZE
+  };
+  const width = Number(paintSize.value || 24);
+  paintContext.save();
+  paintContext.globalCompositeOperation = paintEraseMode ? 'destination-out' : 'source-over';
+  paintContext.strokeStyle = paintColour.value;
+  paintContext.fillStyle = paintColour.value;
+  paintContext.lineWidth = width;
+  paintContext.lineCap = 'round';
+  paintContext.lineJoin = 'round';
+  if (previousPaintPoint && Math.hypot(point.x - previousPaintPoint.x, point.y - previousPaintPoint.y) < PAINT_TEXTURE_SIZE * 0.16) {
+    paintContext.beginPath();
+    paintContext.moveTo(previousPaintPoint.x, previousPaintPoint.y);
+    paintContext.lineTo(point.x, point.y);
+    paintContext.stroke();
+  } else {
+    paintContext.beginPath();
+    paintContext.arc(point.x, point.y, width * 0.5, 0, Math.PI * 2);
+    paintContext.fill();
+  }
+  paintContext.restore();
+  previousPaintPoint = point;
+  paintTexture.needsUpdate = true;
+  return true;
 }
 
 function aimEyes(event) {
@@ -661,6 +751,16 @@ function beginDrag(event) {
   if (!head || activePointer !== null) return;
   setPointer(event);
   raycaster.setFromCamera(pointer, camera);
+  if (paintMode) {
+    event.preventDefault();
+    activePointer = event.pointerId;
+    canvas.setPointerCapture(event.pointerId);
+    dragging = true;
+    dragMode = 'paint';
+    previousPaintPoint = null;
+    paintAtPointer();
+    return;
+  }
   if (jointRoot && !jointSpitting) {
     const jointHit = raycaster.intersectObject(jointRoot, true)[0];
     if (jointHit) {
@@ -715,6 +815,10 @@ function moveDrag(event) {
   event.preventDefault();
   setPointer(event);
   raycaster.setFromCamera(pointer, camera);
+  if (dragMode === 'paint') {
+    paintAtPointer();
+    return;
+  }
   if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return;
 
   if (dragMode === 'joint') {
@@ -759,6 +863,7 @@ function endDrag(event) {
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   if (endedMode === 'face') releaseGroan();
   if (endedMode === 'face') fullFaceRecoveryAt = performance.now() + 10000;
+  if (endedMode === 'paint') previousPaintPoint = null;
 }
 
 function equipDurag() {
@@ -989,6 +1094,21 @@ duragButton.addEventListener('click', () => {
 bandanaButton.addEventListener('click', () => {
   if (bandanaEquipped) detachBandana();
   else equipBandana();
+});
+paintToggle.addEventListener('click', () => {
+  paintMode = !paintMode;
+  paintToggle.setAttribute('aria-pressed', String(paintMode));
+  paintOptions.hidden = !paintMode;
+  stage.classList.toggle('painting', paintMode);
+});
+paintEraser.addEventListener('click', () => {
+  paintEraseMode = !paintEraseMode;
+  paintEraser.setAttribute('aria-pressed', String(paintEraseMode));
+});
+paintClear.addEventListener('click', () => {
+  if (!paintContext || !paintTexture) return;
+  paintContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
+  paintTexture.needsUpdate = true;
 });
 
 const clock = new THREE.Clock();

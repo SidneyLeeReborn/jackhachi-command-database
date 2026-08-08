@@ -20,6 +20,15 @@
       <div id="loading">LOADING INDUSTRIAL FACE...</div>
       <canvas id="face-canvas"></canvas>
       <div id="smoke-layer" aria-hidden="true"></div>
+      <div id="paint-tools" class="paint-tools">
+        <button id="paint-toggle" type="button" aria-pressed="false">PAINT</button>
+        <div id="paint-options" class="paint-options" hidden>
+          <label title="Paint colour"><span>INK</span><input id="paint-colour" type="color" value="#ff00ff"></label>
+          <label><span>SIZE</span><select id="paint-size"><option value="10">S</option><option value="24" selected>M</option><option value="48">L</option></select></label>
+          <button id="paint-eraser" type="button" aria-pressed="false">ERASE</button>
+          <button id="paint-clear" type="button">CLEAN</button>
+        </div>
+      </div>
       <button id="joint-toggle" class="item-button joint-button" type="button" aria-pressed="false" title="Drop joint" disabled>
         <img src="./joint-icon.png" alt="Drop Jackhachi's joint">
         <span>JOINT</span>

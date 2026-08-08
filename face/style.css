@@ -65,6 +65,7 @@ header p {
 }
 
 #face-stage.grabbing { cursor: url("./cursor.cur"), grabbing; }
+#face-stage.painting, #face-stage.painting.grabbing { cursor: crosshair; }
 
 #face-canvas {
   display: block;
@@ -80,6 +81,34 @@ header p {
   overflow: hidden;
   pointer-events: none;
 }
+
+.paint-tools {
+  position: absolute;
+  z-index: 5;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font: bold 9px "MS Sans Serif", Arial, sans-serif;
+}
+
+.paint-tools button { padding: 4px 7px; font-size: 10px; }
+.paint-tools > button[aria-pressed="true"] { border-style: inset; background: #ffff00; }
+.paint-options {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 3px outset #ddd;
+  background: #c0c0c0;
+  color: #000;
+}
+.paint-options[hidden] { display: none; }
+.paint-options label { display: flex; align-items: center; gap: 2px; }
+.paint-options input[type="color"] { width: 25px; height: 22px; padding: 0; border: 2px inset #ddd; }
+.paint-options select { height: 22px; font: bold 10px "MS Sans Serif", Arial, sans-serif; }
+.paint-options button[aria-pressed="true"] { border-style: inset; background: #ffb8b8; }
 
 .item-button {
   position: absolute;
