@@ -259,12 +259,12 @@ footer { color: #ff9cf5; font-size: 12px; font-weight: bold; }
 }
 
 @keyframes headwear-spark {
-  0% { opacity: 0; transform: rotate(var(--spark-turn)) translateX(7px) scaleX(.2); }
+  0% { opacity: 0; transform: rotate(var(--spark-turn)) translateX(21px) scaleX(.2); }
   16% { opacity: .95; }
-  48% { opacity: .72; transform: rotate(var(--spark-turn)) translateX(7px) scaleX(1); }
+  48% { opacity: .72; transform: rotate(var(--spark-turn)) translateX(21px) scaleX(1); }
   68% { opacity: 0; }
   79% { opacity: .65; }
-  100% { opacity: 0; transform: rotate(var(--spark-turn)) translateX(7px) scaleX(.72); }
+  100% { opacity: 0; transform: rotate(var(--spark-turn)) translateX(21px) scaleX(.72); }
 }
 
 @media (max-width: 560px) {

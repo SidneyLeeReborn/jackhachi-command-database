@@ -1090,7 +1090,7 @@ function emitHeadwearPoof(headwearRoot) {
     ));
     setTimeout(() => emitSmokeAtWorld(point, true, true, 3.8, smokeType), i * 18);
   }
-  const sparkCentre = centre.clone().add(new THREE.Vector3(0, 0, 0.14));
+  const sparkCentre = centre.clone().add(new THREE.Vector3(0.04, -0.04, 0.14));
   for (let i = 0; i < 40; i++) {
     const angle = i / 40 * 360 + (Math.random() - 0.5) * 5;
     setTimeout(() => emitHeadwearSpark(sparkCentre, smokeType, angle), 18 + i * 8);
