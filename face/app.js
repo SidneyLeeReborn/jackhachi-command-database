@@ -750,11 +750,12 @@ function equipDurag() {
 
 function emitDuragPoof() {
   if (!modelPivot) return;
-  for (let i = 0; i < 14; i++) {
-    const angle = (i / 14) * Math.PI * 2;
-    const point = new THREE.Vector3(Math.cos(angle) * 0.38, 0.12 + Math.sin(angle) * 0.48, 0.55);
+  for (let i = 0; i < 30; i++) {
+    const angle = (i / 30) * Math.PI * 2;
+    const radius = 0.08 + (i % 5) * 0.045;
+    const point = new THREE.Vector3(Math.cos(angle) * radius, 0.12 + Math.sin(angle) * radius, 0.72);
     modelPivot.localToWorld(point);
-    setTimeout(() => emitSmokeAtWorld(point, true, true), i * 24);
+    setTimeout(() => emitSmokeAtWorld(point, true, true, 3.8), i * 18);
   }
 }
 
@@ -874,7 +875,7 @@ function emitNoseSmoke(side = 1) {
   emitSmokeAtWorld(nostril, true);
 }
 
-function emitSmokeAtWorld(worldPoint, fromNose, heavy = false) {
+function emitSmokeAtWorld(worldPoint, fromNose, heavy = false, sizeMultiplier = 1) {
   projectedTip.copy(worldPoint).project(camera);
   if (projectedTip.z < -1 || projectedTip.z > 1) return;
   const puff = document.createElement('span');
@@ -882,7 +883,8 @@ function emitSmokeAtWorld(worldPoint, fromNose, heavy = false) {
   puff.style.left = `${(projectedTip.x * 0.5 + 0.5) * stage.clientWidth}px`;
   puff.style.top = `${(-projectedTip.y * 0.5 + 0.5) * stage.clientHeight}px`;
   const drift = Math.round(Math.random() * (fromNose ? 44 : 70) - (fromNose ? 22 : 35));
-  puff.style.setProperty('--smoke-size', `${(fromNose ? 30 : heavy ? 31 : 22) + Math.round(Math.random() * 13)}px`);
+  const baseSize = (fromNose ? 30 : heavy ? 31 : 22) + Math.round(Math.random() * 13);
+  puff.style.setProperty('--smoke-size', `${baseSize * sizeMultiplier}px`);
   puff.style.setProperty('--smoke-life', `${(fromNose ? 3.5 : 2.8) + Math.random() * 1.25}s`);
   puff.style.setProperty('--smoke-drift', `${drift}px`);
   puff.style.setProperty('--smoke-drift-end', `${drift + Math.round(Math.random() * 50 - 25)}px`);
