@@ -197,18 +197,16 @@ header p {
   position: absolute;
   z-index: 2;
   width: var(--spark-length);
-  height: 1px;
+  height: 9px;
   pointer-events: none;
   opacity: 0;
   transform-origin: 0 50%;
-  background: #f8ffff;
-  clip-path: polygon(0 0, 29% 0, 37% 100%, 63% 0, 72% 100%, 100% 0, 100% 100%, 73% 100%, 64% 0, 38% 100%, 28% 0, 0 100%);
   filter: drop-shadow(0 0 1px currentColor);
   animation: headwear-spark .38s steps(2, end) forwards;
 }
 
-.durag-spark { color: #77dcff; background: #eaffff; }
-.bandana-spark { color: #ff2b20; background: #fff2a8; }
+.durag-spark { color: #dffcff; }
+.bandana-spark { color: #fff2a8; }
 
 #loading {
   position: absolute;

@@ -1090,7 +1090,7 @@ function emitHeadwearPoof(headwearRoot) {
     ));
     setTimeout(() => emitSmokeAtWorld(point, true, true, 3.8, smokeType), i * 18);
   }
-  const sparkCentre = centre.clone().add(new THREE.Vector3(0.04, -0.04, 0.14));
+  const sparkCentre = centre.clone().add(new THREE.Vector3(0.052, -0.048, 0.14));
   for (let i = 0; i < 40; i++) {
     const angle = i / 40 * 360 + (Math.random() - 0.5) * 5;
     setTimeout(() => emitHeadwearSpark(sparkCentre, smokeType, angle), 18 + i * 8);
@@ -1100,8 +1100,17 @@ function emitHeadwearPoof(headwearRoot) {
 function emitHeadwearSpark(worldPoint, smokeType, angle) {
   projectedTip.copy(worldPoint).project(camera);
   if (projectedTip.z < -1 || projectedTip.z > 1) return;
-  const spark = document.createElement('span');
-  spark.className = `headwear-spark ${smokeType}-spark`;
+  const spark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  spark.setAttribute('class', `headwear-spark ${smokeType}-spark`);
+  spark.setAttribute('viewBox', '0 0 100 20');
+  spark.setAttribute('preserveAspectRatio', 'none');
+  const bolt = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  bolt.setAttribute('points', `0,10 17,${5 + Math.random() * 4} 34,${12 + Math.random() * 5} 51,${3 + Math.random() * 4} 68,${12 + Math.random() * 5} 84,${5 + Math.random() * 4} 100,10`);
+  bolt.setAttribute('fill', 'none');
+  bolt.setAttribute('stroke', 'currentColor');
+  bolt.setAttribute('stroke-width', '1.35');
+  bolt.setAttribute('vector-effect', 'non-scaling-stroke');
+  spark.append(bolt);
   spark.style.left = `${(projectedTip.x * 0.5 + 0.5) * stage.clientWidth}px`;
   spark.style.top = `${(-projectedTip.y * 0.5 + 0.5) * stage.clientHeight}px`;
   spark.style.setProperty('--spark-turn', `${angle}deg`);
