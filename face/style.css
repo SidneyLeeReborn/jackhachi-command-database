@@ -107,8 +107,24 @@ header p {
 .paint-options[hidden] { display: none; }
 .paint-options label { display: flex; align-items: center; gap: 2px; }
 .paint-options input[type="color"] { width: 25px; height: 22px; padding: 0; border: 2px inset #ddd; }
+.paint-options input[type="range"] { width: 62px; margin: 0; }
 .paint-options select { height: 22px; font: bold 10px "MS Sans Serif", Arial, sans-serif; }
+.paint-options output { min-width: 27px; font-size: 8px; }
+.paint-slider { padding-left: 3px; border-left: 1px solid #777; }
 .paint-options button[aria-pressed="true"] { border-style: inset; background: #ffb8b8; }
+
+#paint-cursor {
+  position: absolute;
+  z-index: 6;
+  display: none;
+  box-sizing: border-box;
+  border: 1px solid rgba(255,255,255,.95);
+  border-radius: 50%;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  mix-blend-mode: difference;
+}
+#face-stage.painting #paint-cursor { display: block; }
 
 .item-button {
   position: absolute;
@@ -185,4 +201,5 @@ footer { color: #ff9cf5; font-size: 12px; font-weight: bold; }
   #face-stage { min-height: 370px; height: 66vh; border-width: 4px; }
   h1 { font-size: clamp(18px, 5.4vw, 22px); letter-spacing: 0; }
   header p { font-size: 12px; }
+  .paint-options { max-width: calc(100vw - 75px); flex-wrap: wrap; }
 }

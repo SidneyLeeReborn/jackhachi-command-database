@@ -14,8 +14,13 @@ const paintToggle = document.querySelector('#paint-toggle');
 const paintOptions = document.querySelector('#paint-options');
 const paintColour = document.querySelector('#paint-colour');
 const paintSize = document.querySelector('#paint-size');
+const paintHardness = document.querySelector('#paint-hardness');
+const paintHardnessValue = document.querySelector('#paint-hardness-value');
+const paintOpacity = document.querySelector('#paint-opacity');
+const paintOpacityValue = document.querySelector('#paint-opacity-value');
 const paintEraser = document.querySelector('#paint-eraser');
 const paintClear = document.querySelector('#paint-clear');
+const paintCursor = document.querySelector('#paint-cursor');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
@@ -109,6 +114,8 @@ let paintContext = null;
 let paintMode = false;
 let paintEraseMode = false;
 let previousPaintPoint = null;
+const paintStampCanvas = document.createElement('canvas');
+const paintStampContext = paintStampCanvas.getContext('2d');
 let idleTime = 0;
 let entranceTime = 0;
 let fullFaceRecoveryAt = 0;
@@ -386,6 +393,28 @@ function paintBlockerIsCloser(headHit) {
   return Boolean(blockerHit && blockerHit.distance <= headHit.distance + 0.002);
 }
 
+function buildPaintStamp(width) {
+  const stampSize = Math.max(4, Math.ceil(width + 4));
+  paintStampCanvas.width = stampSize;
+  paintStampCanvas.height = stampSize;
+  const center = stampSize * 0.5;
+  const radius = width * 0.5;
+  const hardness = Number(paintHardness.value) / 100;
+  const solidEdge = Math.min(0.999, hardness);
+  const gradient = paintStampContext.createRadialGradient(center, center, 0, center, center, radius);
+  gradient.addColorStop(0, paintColour.value);
+  gradient.addColorStop(solidEdge, paintColour.value);
+  gradient.addColorStop(1, 'rgba(0,0,0,0)');
+  paintStampContext.clearRect(0, 0, stampSize, stampSize);
+  paintStampContext.fillStyle = gradient;
+  paintStampContext.fillRect(0, 0, stampSize, stampSize);
+  return stampSize;
+}
+
+function stampPaint(point, width, stampSize) {
+  paintContext.drawImage(paintStampCanvas, point.x - stampSize * 0.5, point.y - stampSize * 0.5);
+}
+
 function paintAtPointer() {
   if (!paintContext || !paintTexture || !head) return false;
   const hit = raycaster.intersectObject(head, false)[0];
@@ -398,27 +427,41 @@ function paintAtPointer() {
     y: (1 - hit.uv.y) * PAINT_TEXTURE_SIZE
   };
   const width = Number(paintSize.value || 24);
+  const stampSize = buildPaintStamp(width);
   paintContext.save();
   paintContext.globalCompositeOperation = paintEraseMode ? 'destination-out' : 'source-over';
-  paintContext.strokeStyle = paintColour.value;
-  paintContext.fillStyle = paintColour.value;
-  paintContext.lineWidth = width;
-  paintContext.lineCap = 'round';
-  paintContext.lineJoin = 'round';
+  paintContext.globalAlpha = Number(paintOpacity.value) / 100;
   if (previousPaintPoint && Math.hypot(point.x - previousPaintPoint.x, point.y - previousPaintPoint.y) < PAINT_TEXTURE_SIZE * 0.16) {
-    paintContext.beginPath();
-    paintContext.moveTo(previousPaintPoint.x, previousPaintPoint.y);
-    paintContext.lineTo(point.x, point.y);
-    paintContext.stroke();
+    const distance = Math.hypot(point.x - previousPaintPoint.x, point.y - previousPaintPoint.y);
+    const steps = Math.max(1, Math.ceil(distance / Math.max(1, width * 0.12)));
+    for (let step = 1; step <= steps; step++) {
+      const t = step / steps;
+      stampPaint({
+        x: THREE.MathUtils.lerp(previousPaintPoint.x, point.x, t),
+        y: THREE.MathUtils.lerp(previousPaintPoint.y, point.y, t)
+      }, width, stampSize);
+    }
   } else {
-    paintContext.beginPath();
-    paintContext.arc(point.x, point.y, width * 0.5, 0, Math.PI * 2);
-    paintContext.fill();
+    stampPaint(point, width, stampSize);
   }
   paintContext.restore();
   previousPaintPoint = point;
   paintTexture.needsUpdate = true;
   return true;
+}
+
+function updatePaintCursor(event) {
+  if (paintMode) paintCursor.style.display = 'block';
+  const rect = stage.getBoundingClientRect();
+  const size = Math.max(7, Number(paintSize.value || 24) * 0.82);
+  const hardness = Number(paintHardness.value) / 100;
+  const opacity = Number(paintOpacity.value) / 100;
+  paintCursor.style.left = `${event.clientX - rect.left}px`;
+  paintCursor.style.top = `${event.clientY - rect.top}px`;
+  paintCursor.style.width = `${size}px`;
+  paintCursor.style.height = `${size}px`;
+  paintCursor.style.opacity = String(0.35 + opacity * 0.65);
+  paintCursor.style.boxShadow = `inset 0 0 ${Math.round((1 - hardness) * size * 0.48)}px rgba(255,255,255,.95), 0 0 1px #000`;
 }
 
 function aimEyes(event) {
@@ -877,7 +920,7 @@ function equipDurag() {
   duragEquipped = true;
   duragButton.setAttribute('aria-pressed', 'true');
   duragButton.title = 'Remove durag';
-  emitDuragPoof();
+  emitHeadwearPoof(duragRoot);
 }
 
 function equipBandana() {
@@ -891,16 +934,23 @@ function equipBandana() {
   bandanaEquipped = true;
   bandanaButton.setAttribute('aria-pressed', 'true');
   bandanaButton.title = 'Remove Sidney bandana';
-  emitDuragPoof();
+  emitHeadwearPoof(bandanaRoot);
 }
 
-function emitDuragPoof() {
-  if (!modelPivot) return;
+function emitHeadwearPoof(headwearRoot) {
+  if (!modelPivot || !headwearRoot) return;
+  modelPivot.updateMatrixWorld(true);
+  // One reliable attachment point at the top-front of Jackhachi's skull.
+  // It follows the head pivot, independent of accessory shape or trailing cloth.
+  const centre = modelPivot.localToWorld(new THREE.Vector3(0, 1.02, 0.48));
   for (let i = 0; i < 30; i++) {
     const angle = (i / 30) * Math.PI * 2;
-    const radius = 0.08 + (i % 5) * 0.045;
-    const point = new THREE.Vector3(Math.cos(angle) * radius, 0.12 + Math.sin(angle) * radius, 0.72);
-    modelPivot.localToWorld(point);
+    const radius = 0.035 + (i % 5) * 0.038;
+    const point = centre.clone().add(new THREE.Vector3(
+      Math.cos(angle) * radius,
+      Math.sin(angle) * radius,
+      0.08 + (i % 3) * 0.018
+    ));
     setTimeout(() => emitSmokeAtWorld(point, true, true, 3.8), i * 18);
   }
 }
@@ -1082,7 +1132,12 @@ function restoreFactoryFace() {
 canvas.addEventListener('pointerdown', beginDrag);
 canvas.addEventListener('pointermove', moveDrag);
 canvas.addEventListener('pointermove', aimEyes);
-canvas.addEventListener('pointerleave', () => eyeLookTarget.set(0, 0));
+canvas.addEventListener('pointermove', updatePaintCursor);
+canvas.addEventListener('pointerleave', () => {
+  eyeLookTarget.set(0, 0);
+  paintCursor.style.display = 'none';
+});
+canvas.addEventListener('pointerenter', () => { if (paintMode) paintCursor.style.display = 'block'; });
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 if (resetButton) resetButton.addEventListener('click', restoreFactoryFace);
@@ -1100,7 +1155,10 @@ paintToggle.addEventListener('click', () => {
   paintToggle.setAttribute('aria-pressed', String(paintMode));
   paintOptions.hidden = !paintMode;
   stage.classList.toggle('painting', paintMode);
+  if (!paintMode) paintCursor.style.display = 'none';
 });
+paintHardness.addEventListener('input', () => { paintHardnessValue.value = `${paintHardness.value}%`; });
+paintOpacity.addEventListener('input', () => { paintOpacityValue.value = `${paintOpacity.value}%`; });
 paintEraser.addEventListener('click', () => {
   paintEraseMode = !paintEraseMode;
   paintEraser.setAttribute('aria-pressed', String(paintEraseMode));
@@ -1163,8 +1221,8 @@ function animate() {
   if (modelPivot) {
     const idleStrength = dragging ? 0.25 : 1;
     const followEase = 1 - Math.exp(-3.2 * dt);
-    turnAngle = THREE.MathUtils.lerp(turnAngle, eyeLookTarget.x * 0.30, followEase);
-    headPitch = THREE.MathUtils.lerp(headPitch, -eyeLookTarget.y * 0.12, followEase);
+    turnAngle = THREE.MathUtils.lerp(turnAngle, eyeLookTarget.x * 0.384, followEase);
+    headPitch = THREE.MathUtils.lerp(headPitch, -eyeLookTarget.y * 0.154, followEase);
     modelPivot.rotation.y = turnAngle;
     modelPivot.rotation.z = (Math.sin(idleTime * 1.05) * 0.012 + Math.sin(idleTime * 0.43 + 1.8) * 0.005) * idleStrength;
     modelPivot.rotation.x = headPitch + (Math.sin(idleTime * 0.72 + 0.6) * 0.006) * idleStrength;
