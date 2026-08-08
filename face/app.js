@@ -21,6 +21,8 @@ const paintHardnessValue = document.querySelector('#paint-hardness-value');
 const paintOpacity = document.querySelector('#paint-opacity');
 const paintOpacityValue = document.querySelector('#paint-opacity-value');
 const paintEraser = document.querySelector('#paint-eraser');
+const paintUndo = document.querySelector('#paint-undo');
+const paintRedo = document.querySelector('#paint-redo');
 const paintClear = document.querySelector('#paint-clear');
 const paintCursor = document.querySelector('#paint-cursor');
 
@@ -125,6 +127,8 @@ let activePaintOpacity = 1;
 let paintDirtyBounds = null;
 let paintTextureUpdateQueued = false;
 let paintStampKey = '';
+let paintHistory = [];
+let paintRedoHistory = [];
 const paintBaseCanvas = document.createElement('canvas');
 const paintStrokeCanvas = document.createElement('canvas');
 const paintStampCanvas = document.createElement('canvas');
@@ -165,6 +169,7 @@ const INHALE_CYCLE = 8000;
 const GROAN_DRAG_DELAY = 500;
 const PAINT_TEXTURE_SIZE = 1024;
 const PAINT_SIZE_SCALE = PAINT_TEXTURE_SIZE / 2048;
+const PAINT_HISTORY_LIMIT = 2;
 
 // Mouse placement should feel physical without demanding pixel-perfect contact.
 // This is measured from the joint's mouth end to the nearest head vertex.
@@ -407,6 +412,31 @@ function setupPaintLayer() {
   paintLayer.renderOrder = head.renderOrder + 2;
   paintLayer.frustumCulled = false;
   head.parent.add(paintLayer);
+  recordPaintState();
+}
+
+function updatePaintHistoryButtons() {
+  paintUndo.disabled = paintHistory.length <= 1;
+  paintRedo.disabled = paintRedoHistory.length === 0;
+}
+
+function recordPaintState() {
+  if (!paintBaseContext) return;
+  paintHistory.push(paintBaseContext.getImageData(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE));
+  if (paintHistory.length > PAINT_HISTORY_LIMIT) paintHistory.shift();
+  paintRedoHistory = [];
+  updatePaintHistoryButtons();
+}
+
+function restorePaintState(snapshot) {
+  if (!snapshot || !paintBaseContext || !paintContext || !paintStrokeContext) return;
+  paintBaseContext.putImageData(snapshot, 0, 0);
+  paintStrokeContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
+  paintContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
+  paintContext.drawImage(paintBaseCanvas, 0, 0);
+  paintDirtyBounds = null;
+  queuePaintTextureUpdate();
+  updatePaintHistoryButtons();
 }
 
 function paintBlockerIsCloser(headHit) {
@@ -509,6 +539,7 @@ function commitPaintStroke() {
   paintStrokeContext.clearRect(x, y, width, height);
   renderPaintComposite(false);
   paintDirtyBounds = null;
+  recordPaintState();
 }
 
 function paintAtPointer() {
@@ -1042,7 +1073,7 @@ function emitHeadwearPoof(headwearRoot) {
   modelPivot.updateMatrixWorld(true);
   // One reliable attachment point at the top-front of Jackhachi's skull.
   // It follows the head pivot, independent of accessory shape or trailing cloth.
-  const centre = modelPivot.localToWorld(new THREE.Vector3(-0.14, 0.40, 0.48));
+  const centre = modelPivot.localToWorld(new THREE.Vector3(-0.17, 0.40, 0.48));
   const smokeType = headwearRoot === duragRoot ? 'durag' : 'bandana';
   for (let i = 0; i < 30; i++) {
     // Jump around the circle instead of drawing it clockwise, so even the
@@ -1056,6 +1087,27 @@ function emitHeadwearPoof(headwearRoot) {
     ));
     setTimeout(() => emitSmokeAtWorld(point, true, true, 3.8, smokeType), i * 18);
   }
+  for (let i = 0; i < 12; i++) {
+    const sparkPoint = centre.clone().add(new THREE.Vector3(
+      (Math.random() - 0.5) * 0.30,
+      (Math.random() - 0.5) * 0.24,
+      0.14
+    ));
+    setTimeout(() => emitHeadwearSpark(sparkPoint, smokeType), 30 + i * 34);
+  }
+}
+
+function emitHeadwearSpark(worldPoint, smokeType) {
+  projectedTip.copy(worldPoint).project(camera);
+  if (projectedTip.z < -1 || projectedTip.z > 1) return;
+  const spark = document.createElement('span');
+  spark.className = `headwear-spark ${smokeType}-spark`;
+  spark.style.left = `${(projectedTip.x * 0.5 + 0.5) * stage.clientWidth}px`;
+  spark.style.top = `${(-projectedTip.y * 0.5 + 0.5) * stage.clientHeight}px`;
+  spark.style.setProperty('--spark-turn', `${Math.round(Math.random() * 150 - 75)}deg`);
+  spark.style.setProperty('--spark-length', `${34 + Math.round(Math.random() * 42)}px`);
+  smokeLayer.append(spark);
+  spark.addEventListener('animationend', () => spark.remove(), { once: true });
 }
 
 function toggleJointItem() {
@@ -1304,6 +1356,17 @@ paintEraser.addEventListener('click', () => {
   paintEraseMode = !paintEraseMode;
   paintEraser.setAttribute('aria-pressed', String(paintEraseMode));
 });
+paintUndo.addEventListener('click', () => {
+  if (paintHistory.length <= 1) return;
+  paintRedoHistory.push(paintHistory.pop());
+  restorePaintState(paintHistory[paintHistory.length - 1]);
+});
+paintRedo.addEventListener('click', () => {
+  if (!paintRedoHistory.length) return;
+  const snapshot = paintRedoHistory.pop();
+  paintHistory.push(snapshot);
+  restorePaintState(snapshot);
+});
 paintClear.addEventListener('click', () => {
   if (!paintContext || !paintTexture || !paintBaseContext || !paintStrokeContext) return;
   paintBaseContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
@@ -1311,6 +1374,7 @@ paintClear.addEventListener('click', () => {
   paintContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
   paintDirtyBounds = null;
   queuePaintTextureUpdate();
+  recordPaintState();
 });
 
 const clock = new THREE.Clock();
