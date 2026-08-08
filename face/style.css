@@ -66,6 +66,7 @@ header p {
 
 #face-stage.grabbing { cursor: url("./cursor.cur"), grabbing; }
 #face-stage.painting, #face-stage.painting.grabbing { cursor: url("./cursor.cur"), auto; }
+#face-stage.painting #face-canvas { cursor: url("./cursor.cur"), auto; }
 #face-stage.painting.brush-over-head,
 #face-stage.painting.brush-over-head #face-canvas { cursor: none; }
 
@@ -175,6 +176,23 @@ header p {
   animation: terrible-smoke var(--smoke-life) ease-out forwards;
 }
 
+.smoke-puff.headwear-smoke {
+  background: radial-gradient(circle at 42% 42%, var(--headwear-smoke-core) 0 17%, var(--headwear-smoke-mid) 47%, var(--headwear-smoke-edge) 77%);
+  animation-name: headwear-smoke;
+}
+
+.smoke-puff.durag-smoke {
+  --headwear-smoke-core: rgba(36, 36, 42, .55);
+  --headwear-smoke-mid: rgba(5, 5, 8, .38);
+  --headwear-smoke-edge: rgba(0, 0, 0, 0);
+}
+
+.smoke-puff.bandana-smoke {
+  --headwear-smoke-core: rgba(255, 65, 65, .55);
+  --headwear-smoke-mid: rgba(155, 0, 8, .38);
+  --headwear-smoke-edge: rgba(70, 0, 4, 0);
+}
+
 #loading {
   position: absolute;
   z-index: 3;
@@ -212,6 +230,13 @@ footer { color: #ff9cf5; font-size: 12px; font-weight: bold; }
   0% { opacity: 0; transform: translate(0, 0) scale(.35) rotate(0deg); }
   13% { opacity: .56; }
   55% { opacity: .38; transform: translate(var(--smoke-drift), -34px) scale(1.18) rotate(var(--smoke-turn)); }
+  100% { opacity: 0; transform: translate(var(--smoke-drift-end), -88px) scale(2.15) rotate(var(--smoke-turn-end)); }
+}
+
+@keyframes headwear-smoke {
+  0% { opacity: 0; transform: translate(0, 0) scale(.35) rotate(0deg); }
+  13% { opacity: .28; }
+  55% { opacity: .19; transform: translate(var(--smoke-drift), -34px) scale(1.18) rotate(var(--smoke-turn)); }
   100% { opacity: 0; transform: translate(var(--smoke-drift-end), -88px) scale(2.15) rotate(var(--smoke-turn-end)); }
 }
 
