@@ -96,6 +96,7 @@ let duragRoot = null;
 let duragEquipped = false;
 let idleTime = 0;
 let entranceTime = 0;
+let fullFaceRecoveryAt = 0;
 let groanContext = null;
 let groanBuffer = null;
 let groanOriginalBuffer = null;
@@ -117,7 +118,6 @@ const JOINT_SCALE = 7;
 const JOINT_LOOSE_POSITION = new THREE.Vector3(-0.56, -0.43, 0.92);
 const JOINT_LOOSE_ROTATION = THREE.MathUtils.degToRad(-8);
 const ALTERED_FACE_DELAY = 4000;
-const ALTERED_FACE_MAX_TIME = 10000;
 const ALTERED_FACE_FADE_IN = 60000;
 const ALTERED_FACE_FADE_OUT = 3000;
 const SMILE_FADE_IN = 60000;
@@ -663,6 +663,7 @@ function beginDrag(event) {
   canvas.setPointerCapture(event.pointerId);
   dragging = true;
   dragMode = 'face';
+  fullFaceRecoveryAt = 0;
   stage.classList.add('grabbing');
 
   startWorld.copy(hit.point);
@@ -735,6 +736,7 @@ function endDrag(event) {
   stage.classList.remove('grabbing');
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   if (endedMode === 'face') releaseGroan();
+  if (endedMode === 'face') fullFaceRecoveryAt = performance.now() + 10000;
 }
 
 function equipDurag() {
@@ -968,10 +970,7 @@ function animate() {
     jointRoot.position.copy(tempVertex).add(jointSnapOffset);
   }
 
-  const jointFaceAge = now - jointSnappedAt;
-  const alteredTarget = jointSnapped &&
-    jointFaceAge >= ALTERED_FACE_DELAY &&
-    jointFaceAge < ALTERED_FACE_MAX_TIME ? 1 : 0;
+  const alteredTarget = jointSnapped && now - jointSnappedAt >= ALTERED_FACE_DELAY ? 1 : 0;
   const alteredDuration = alteredTarget > alteredFaceOpacity ? ALTERED_FACE_FADE_IN : ALTERED_FACE_FADE_OUT;
   alteredFaceOpacity = THREE.MathUtils.clamp(
     alteredFaceOpacity + Math.sign(alteredTarget - alteredFaceOpacity) * dt / (alteredDuration / 1000),
@@ -1062,6 +1061,22 @@ function animate() {
     jointRoot.rotation.z -= 5.6 * dt;
     jointRoot.rotation.x += 2.2 * dt;
     if (now - jointSpitAt > 1450) returnFreshJoint();
+  }
+
+  if (positions && fullFaceRecoveryAt && now >= fullFaceRecoveryAt && dragMode !== 'face') {
+    const recovery = Math.exp(-2.15 * dt);
+    let stillRecovering = false;
+    for (let i = 0; i < offsets.length; i++) {
+      offsets[i] *= recovery;
+      velocities[i] = 0;
+      if (Math.abs(offsets[i]) < 0.00008) offsets[i] = 0;
+      else stillRecovering = true;
+      positions.array[i] = rest[i] + offsets[i];
+    }
+    positions.needsUpdate = true;
+    active = [];
+    weights = [];
+    if (!stillRecovering) fullFaceRecoveryAt = 0;
   }
 
   if (positions && active.length) {
