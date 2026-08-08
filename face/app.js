@@ -1090,25 +1090,22 @@ function emitHeadwearPoof(headwearRoot) {
     ));
     setTimeout(() => emitSmokeAtWorld(point, true, true, 3.8, smokeType), i * 18);
   }
-  for (let i = 0; i < 26; i++) {
-    const sparkPoint = centre.clone().add(new THREE.Vector3(
-      (Math.random() - 0.5) * 0.13,
-      (Math.random() - 0.5) * 0.10,
-      0.14
-    ));
-    setTimeout(() => emitHeadwearSpark(sparkPoint, smokeType), 25 + i * 15);
+  const sparkCentre = centre.clone().add(new THREE.Vector3(0, 0, 0.14));
+  for (let i = 0; i < 40; i++) {
+    const angle = i / 40 * 360 + (Math.random() - 0.5) * 5;
+    setTimeout(() => emitHeadwearSpark(sparkCentre, smokeType, angle), 18 + i * 8);
   }
 }
 
-function emitHeadwearSpark(worldPoint, smokeType) {
+function emitHeadwearSpark(worldPoint, smokeType, angle) {
   projectedTip.copy(worldPoint).project(camera);
   if (projectedTip.z < -1 || projectedTip.z > 1) return;
   const spark = document.createElement('span');
   spark.className = `headwear-spark ${smokeType}-spark`;
   spark.style.left = `${(projectedTip.x * 0.5 + 0.5) * stage.clientWidth}px`;
   spark.style.top = `${(-projectedTip.y * 0.5 + 0.5) * stage.clientHeight}px`;
-  spark.style.setProperty('--spark-turn', `${Math.round(Math.random() * 150 - 75)}deg`);
-  spark.style.setProperty('--spark-length', `${26 + Math.round(Math.random() * 28)}px`);
+  spark.style.setProperty('--spark-turn', `${angle}deg`);
+  spark.style.setProperty('--spark-length', `${52 + Math.round(Math.random() * 36)}px`);
   smokeLayer.append(spark);
   spark.addEventListener('animationend', () => spark.remove(), { once: true });
 }

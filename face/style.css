@@ -197,13 +197,13 @@ header p {
   position: absolute;
   z-index: 2;
   width: var(--spark-length);
-  height: 3px;
+  height: 1px;
   pointer-events: none;
   opacity: 0;
   transform-origin: 0 50%;
   background: #f8ffff;
-  clip-path: polygon(0 38%, 31% 0, 42% 38%, 68% 5%, 56% 55%, 100% 42%, 63% 100%, 48% 66%, 24% 100%);
-  filter: drop-shadow(0 0 2px currentColor);
+  clip-path: polygon(0 0, 29% 0, 37% 100%, 63% 0, 72% 100%, 100% 0, 100% 100%, 73% 100%, 64% 0, 38% 100%, 28% 0, 0 100%);
+  filter: drop-shadow(0 0 1px currentColor);
   animation: headwear-spark .38s steps(2, end) forwards;
 }
 
@@ -259,12 +259,12 @@ footer { color: #ff9cf5; font-size: 12px; font-weight: bold; }
 }
 
 @keyframes headwear-spark {
-  0% { opacity: 0; transform: rotate(var(--spark-turn)) scaleX(.25); }
+  0% { opacity: 0; transform: rotate(var(--spark-turn)) translateX(7px) scaleX(.2); }
   16% { opacity: .95; }
-  48% { opacity: .72; transform: rotate(var(--spark-turn)) scaleX(1); }
+  48% { opacity: .72; transform: rotate(var(--spark-turn)) translateX(7px) scaleX(1); }
   68% { opacity: 0; }
   79% { opacity: .65; }
-  100% { opacity: 0; transform: rotate(var(--spark-turn)) scaleX(.72); }
+  100% { opacity: 0; transform: rotate(var(--spark-turn)) translateX(7px) scaleX(.72); }
 }
 
 @media (max-width: 560px) {
