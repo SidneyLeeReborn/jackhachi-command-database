@@ -24,12 +24,25 @@
       <div id="paint-tools" class="paint-tools">
         <button id="paint-toggle" type="button" aria-pressed="false">PAINT</button>
         <div id="paint-options" class="paint-options" hidden>
-          <label title="Paint colour"><span>INK</span><input id="paint-colour" type="color" value="#ff00ff"></label>
-          <label><span>SIZE</span><select id="paint-size"><option value="10">S</option><option value="24" selected>M</option><option value="48">L</option></select></label>
-          <label class="paint-slider"><span>HARD</span><input id="paint-hardness" type="range" min="0" max="100" value="80"><output id="paint-hardness-value">80%</output></label>
-          <label class="paint-slider"><span>OPACITY</span><input id="paint-opacity" type="range" min="5" max="100" value="100"><output id="paint-opacity-value">100%</output></label>
+          <button type="button" data-paint-panel="ink">INK <span id="paint-colour-swatch" class="paint-colour-swatch"></span></button>
+          <button type="button" data-paint-panel="size">SIZE</button>
+          <button type="button" data-paint-panel="hardness">HARD</button>
+          <button type="button" data-paint-panel="opacity">OPACITY</button>
           <button id="paint-eraser" type="button" aria-pressed="false">ERASE</button>
           <button id="paint-clear" type="button">CLEAN</button>
+          <div id="paint-panel-ink" class="paint-panel paint-ink-panel" hidden>
+            <div id="paint-palette" class="paint-palette" aria-label="Classic MS Paint colours"></div>
+            <label class="custom-colour">CUSTOM <input id="paint-colour" type="color" value="#ff00ff"></label>
+          </div>
+          <div id="paint-panel-size" class="paint-panel" hidden>
+            <label><span>BRUSH SIZE</span><input id="paint-size" type="range" min="4" max="96" value="24"><output id="paint-size-value">24</output></label>
+          </div>
+          <div id="paint-panel-hardness" class="paint-panel" hidden>
+            <label><span>HARDNESS</span><input id="paint-hardness" type="range" min="0" max="100" value="80"><output id="paint-hardness-value">80%</output></label>
+          </div>
+          <div id="paint-panel-opacity" class="paint-panel" hidden>
+            <label><span>OPACITY</span><input id="paint-opacity" type="range" min="5" max="100" value="100"><output id="paint-opacity-value">100%</output></label>
+          </div>
         </div>
       </div>
       <button id="joint-toggle" class="item-button joint-button" type="button" aria-pressed="false" title="Drop joint" disabled>

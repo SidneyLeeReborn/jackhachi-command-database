@@ -13,7 +13,9 @@ const jointButton = document.querySelector('#joint-toggle');
 const paintToggle = document.querySelector('#paint-toggle');
 const paintOptions = document.querySelector('#paint-options');
 const paintColour = document.querySelector('#paint-colour');
+const paintColourSwatch = document.querySelector('#paint-colour-swatch');
 const paintSize = document.querySelector('#paint-size');
+const paintSizeValue = document.querySelector('#paint-size-value');
 const paintHardness = document.querySelector('#paint-hardness');
 const paintHardnessValue = document.querySelector('#paint-hardness-value');
 const paintOpacity = document.querySelector('#paint-opacity');
@@ -111,9 +113,15 @@ let bandanaEquipped = false;
 let paintLayer = null;
 let paintTexture = null;
 let paintContext = null;
+let paintBaseContext = null;
+let paintStrokeContext = null;
 let paintMode = false;
 let paintEraseMode = false;
 let previousPaintPoint = null;
+let activePaintErase = false;
+let activePaintOpacity = 1;
+const paintBaseCanvas = document.createElement('canvas');
+const paintStrokeCanvas = document.createElement('canvas');
 const paintStampCanvas = document.createElement('canvas');
 const paintStampContext = paintStampCanvas.getContext('2d');
 let idleTime = 0;
@@ -159,6 +167,13 @@ const JOINT_CONTACT_DISTANCE = 0.32;
 const EYE_SPECS = [
   { x: -0.196, y: 0.721, z: 0.395, offsetX: 0.043, offsetY: -0.021, offsetZ: 0.038, size: 1 },
   { x: 0.186, y: 0.723, z: 0.418, offsetX: -0.005, offsetY: -0.012, offsetZ: 0.007, size: 1 }
+];
+
+const CLASSIC_PAINT_COLOURS = [
+  '#000000', '#7f7f7f', '#c3c3c3', '#ffffff', '#7f0000', '#ff0000', '#7f7f00', '#ffff00',
+  '#007f00', '#00ff00', '#007f7f', '#00ffff', '#00007f', '#0000ff', '#7f007f', '#ff00ff',
+  '#7f3f00', '#ff7f00', '#3f7f00', '#7fff00', '#007f3f', '#00ff7f', '#003f7f', '#007fff',
+  '#3f007f', '#7f00ff', '#7f003f', '#ff007f', '#7f3f3f', '#ff7f7f', '#3f7f7f', '#7fffff'
 ];
 
 new GLTFLoader().load(
@@ -354,9 +369,13 @@ function setPointer(event) {
 
 function setupPaintLayer() {
   const paintCanvas = document.createElement('canvas');
-  paintCanvas.width = PAINT_TEXTURE_SIZE;
-  paintCanvas.height = PAINT_TEXTURE_SIZE;
+  for (const target of [paintCanvas, paintBaseCanvas, paintStrokeCanvas]) {
+    target.width = PAINT_TEXTURE_SIZE;
+    target.height = PAINT_TEXTURE_SIZE;
+  }
   paintContext = paintCanvas.getContext('2d');
+  paintBaseContext = paintBaseCanvas.getContext('2d');
+  paintStrokeContext = paintStrokeCanvas.getContext('2d');
   paintTexture = new THREE.CanvasTexture(paintCanvas);
   paintTexture.colorSpace = THREE.SRGBColorSpace;
   paintTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -402,8 +421,9 @@ function buildPaintStamp(width) {
   const hardness = Number(paintHardness.value) / 100;
   const solidEdge = Math.min(0.999, hardness);
   const gradient = paintStampContext.createRadialGradient(center, center, 0, center, center, radius);
-  gradient.addColorStop(0, paintColour.value);
-  gradient.addColorStop(solidEdge, paintColour.value);
+  const colour = activePaintErase ? '#ffffff' : paintColour.value;
+  gradient.addColorStop(0, colour);
+  gradient.addColorStop(solidEdge, colour);
   gradient.addColorStop(1, 'rgba(0,0,0,0)');
   paintStampContext.clearRect(0, 0, stampSize, stampSize);
   paintStampContext.fillStyle = gradient;
@@ -412,7 +432,37 @@ function buildPaintStamp(width) {
 }
 
 function stampPaint(point, width, stampSize) {
-  paintContext.drawImage(paintStampCanvas, point.x - stampSize * 0.5, point.y - stampSize * 0.5);
+  paintStrokeContext.drawImage(paintStampCanvas, point.x - stampSize * 0.5, point.y - stampSize * 0.5);
+}
+
+function renderPaintComposite(showActiveStroke = true) {
+  paintContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
+  paintContext.drawImage(paintBaseCanvas, 0, 0);
+  if (showActiveStroke) {
+    paintContext.save();
+    paintContext.globalCompositeOperation = activePaintErase ? 'destination-out' : 'source-over';
+    paintContext.globalAlpha = activePaintOpacity;
+    paintContext.drawImage(paintStrokeCanvas, 0, 0);
+    paintContext.restore();
+  }
+  paintTexture.needsUpdate = true;
+}
+
+function beginPaintStroke() {
+  paintStrokeContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
+  activePaintErase = paintEraseMode;
+  activePaintOpacity = Number(paintOpacity.value) / 100;
+  previousPaintPoint = null;
+}
+
+function commitPaintStroke() {
+  paintBaseContext.save();
+  paintBaseContext.globalCompositeOperation = activePaintErase ? 'destination-out' : 'source-over';
+  paintBaseContext.globalAlpha = activePaintOpacity;
+  paintBaseContext.drawImage(paintStrokeCanvas, 0, 0);
+  paintBaseContext.restore();
+  paintStrokeContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
+  renderPaintComposite(false);
 }
 
 function paintAtPointer() {
@@ -428,9 +478,6 @@ function paintAtPointer() {
   };
   const width = Number(paintSize.value || 24);
   const stampSize = buildPaintStamp(width);
-  paintContext.save();
-  paintContext.globalCompositeOperation = paintEraseMode ? 'destination-out' : 'source-over';
-  paintContext.globalAlpha = Number(paintOpacity.value) / 100;
   if (previousPaintPoint && Math.hypot(point.x - previousPaintPoint.x, point.y - previousPaintPoint.y) < PAINT_TEXTURE_SIZE * 0.16) {
     const distance = Math.hypot(point.x - previousPaintPoint.x, point.y - previousPaintPoint.y);
     const steps = Math.max(1, Math.ceil(distance / Math.max(1, width * 0.12)));
@@ -444,24 +491,27 @@ function paintAtPointer() {
   } else {
     stampPaint(point, width, stampSize);
   }
-  paintContext.restore();
   previousPaintPoint = point;
-  paintTexture.needsUpdate = true;
+  renderPaintComposite(true);
   return true;
 }
 
 function updatePaintCursor(event) {
-  if (paintMode) paintCursor.style.display = 'block';
-  const rect = stage.getBoundingClientRect();
-  const size = Math.max(7, Number(paintSize.value || 24) * 0.82);
-  const hardness = Number(paintHardness.value) / 100;
-  const opacity = Number(paintOpacity.value) / 100;
-  paintCursor.style.left = `${event.clientX - rect.left}px`;
-  paintCursor.style.top = `${event.clientY - rect.top}px`;
+  if (!paintMode || !head) return;
+  setPointer(event);
+  raycaster.setFromCamera(pointer, camera);
+  const headHit = raycaster.intersectObject(head, false)[0];
+  const canPaint = Boolean(headHit?.uv && !paintBlockerIsCloser(headHit));
+  stage.classList.toggle('brush-over-head', canPaint);
+  paintCursor.style.display = canPaint ? 'block' : 'none';
+  if (!canPaint) return;
+  const size = Math.max(5, Number(paintSize.value || 24) * 0.40);
+  paintCursor.style.left = `${event.clientX}px`;
+  paintCursor.style.top = `${event.clientY}px`;
   paintCursor.style.width = `${size}px`;
   paintCursor.style.height = `${size}px`;
-  paintCursor.style.opacity = String(0.35 + opacity * 0.65);
-  paintCursor.style.boxShadow = `inset 0 0 ${Math.round((1 - hardness) * size * 0.48)}px rgba(255,255,255,.95), 0 0 1px #000`;
+  paintCursor.style.opacity = '1';
+  paintCursor.style.boxShadow = '0 0 1px #000';
 }
 
 function aimEyes(event) {
@@ -800,7 +850,7 @@ function beginDrag(event) {
     canvas.setPointerCapture(event.pointerId);
     dragging = true;
     dragMode = 'paint';
-    previousPaintPoint = null;
+    beginPaintStroke();
     paintAtPointer();
     return;
   }
@@ -906,7 +956,10 @@ function endDrag(event) {
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   if (endedMode === 'face') releaseGroan();
   if (endedMode === 'face') fullFaceRecoveryAt = performance.now() + 10000;
-  if (endedMode === 'paint') previousPaintPoint = null;
+  if (endedMode === 'paint') {
+    commitPaintStroke();
+    previousPaintPoint = null;
+  }
 }
 
 function equipDurag() {
@@ -942,9 +995,11 @@ function emitHeadwearPoof(headwearRoot) {
   modelPivot.updateMatrixWorld(true);
   // One reliable attachment point at the top-front of Jackhachi's skull.
   // It follows the head pivot, independent of accessory shape or trailing cloth.
-  const centre = modelPivot.localToWorld(new THREE.Vector3(0, 1.02, 0.48));
+  const centre = modelPivot.localToWorld(new THREE.Vector3(0, 0.40, 0.48));
   for (let i = 0; i < 30; i++) {
-    const angle = (i / 30) * Math.PI * 2;
+    // Jump around the circle instead of drawing it clockwise, so even the
+    // first few delayed puffs form one centred cloud.
+    const angle = (((i * 13) % 30) / 30) * Math.PI * 2;
     const radius = 0.035 + (i % 5) * 0.038;
     const point = centre.clone().add(new THREE.Vector3(
       Math.cos(angle) * radius,
@@ -1136,8 +1191,8 @@ canvas.addEventListener('pointermove', updatePaintCursor);
 canvas.addEventListener('pointerleave', () => {
   eyeLookTarget.set(0, 0);
   paintCursor.style.display = 'none';
+  stage.classList.remove('brush-over-head');
 });
-canvas.addEventListener('pointerenter', () => { if (paintMode) paintCursor.style.display = 'block'; });
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 if (resetButton) resetButton.addEventListener('click', restoreFactoryFace);
@@ -1155,16 +1210,52 @@ paintToggle.addEventListener('click', () => {
   paintToggle.setAttribute('aria-pressed', String(paintMode));
   paintOptions.hidden = !paintMode;
   stage.classList.toggle('painting', paintMode);
-  if (!paintMode) paintCursor.style.display = 'none';
+  if (!paintMode) {
+    paintCursor.style.display = 'none';
+    stage.classList.remove('brush-over-head');
+    document.querySelectorAll('.paint-panel').forEach((panel) => { panel.hidden = true; });
+  }
 });
+paintSize.addEventListener('input', () => { paintSizeValue.value = paintSize.value; });
 paintHardness.addEventListener('input', () => { paintHardnessValue.value = `${paintHardness.value}%`; });
 paintOpacity.addEventListener('input', () => { paintOpacityValue.value = `${paintOpacity.value}%`; });
+paintColour.addEventListener('input', () => {
+  paintColourSwatch.style.background = paintColour.value;
+  document.querySelectorAll('.paint-swatch').forEach((swatch) => swatch.setAttribute('aria-pressed', 'false'));
+});
+document.querySelectorAll('[data-paint-panel]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const selected = document.querySelector(`#paint-panel-${button.dataset.paintPanel}`);
+    const willOpen = selected.hidden;
+    document.querySelectorAll('.paint-panel').forEach((panel) => { panel.hidden = true; });
+    document.querySelectorAll('[data-paint-panel]').forEach((other) => other.setAttribute('aria-pressed', 'false'));
+    selected.hidden = !willOpen;
+    button.setAttribute('aria-pressed', String(willOpen));
+  });
+});
+for (const colour of CLASSIC_PAINT_COLOURS) {
+  const swatch = document.createElement('button');
+  swatch.type = 'button';
+  swatch.className = 'paint-swatch';
+  swatch.style.background = colour;
+  swatch.title = colour;
+  swatch.setAttribute('aria-label', `Paint colour ${colour}`);
+  swatch.setAttribute('aria-pressed', colour === paintColour.value ? 'true' : 'false');
+  swatch.addEventListener('click', () => {
+    paintColour.value = colour;
+    paintColourSwatch.style.background = colour;
+    document.querySelectorAll('.paint-swatch').forEach((other) => other.setAttribute('aria-pressed', String(other === swatch)));
+  });
+  document.querySelector('#paint-palette').append(swatch);
+}
 paintEraser.addEventListener('click', () => {
   paintEraseMode = !paintEraseMode;
   paintEraser.setAttribute('aria-pressed', String(paintEraseMode));
 });
 paintClear.addEventListener('click', () => {
-  if (!paintContext || !paintTexture) return;
+  if (!paintContext || !paintTexture || !paintBaseContext || !paintStrokeContext) return;
+  paintBaseContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
+  paintStrokeContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
   paintContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
   paintTexture.needsUpdate = true;
 });
