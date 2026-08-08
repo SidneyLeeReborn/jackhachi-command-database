@@ -167,6 +167,7 @@ const JOINT_CONTACT_X = -0.0393;
 const JOINT_MIN_SCALE_X = 0.08;
 const INHALE_CYCLE = 8000;
 const GROAN_DRAG_DELAY = 500;
+const GROAN_CHANCE = 0.18;
 const PAINT_TEXTURE_SIZE = 1024;
 const PAINT_SIZE_SCALE = PAINT_TEXTURE_SIZE / 2048;
 const PAINT_HISTORY_LIMIT = 2;
@@ -859,8 +860,10 @@ function buildGranularSustain(sourceBuffer) {
 
 function scheduleGroan() {
   faceDragStartedAt = performance.now();
-  prepareGroan();
   clearTimeout(groanTimer);
+  groanTimer = null;
+  if (Math.random() >= GROAN_CHANCE) return;
+  prepareGroan();
   groanTimer = setTimeout(() => {
     if (dragging && dragMode === 'face') startGroan();
   }, GROAN_DRAG_DELAY);
@@ -1087,13 +1090,13 @@ function emitHeadwearPoof(headwearRoot) {
     ));
     setTimeout(() => emitSmokeAtWorld(point, true, true, 3.8, smokeType), i * 18);
   }
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 26; i++) {
     const sparkPoint = centre.clone().add(new THREE.Vector3(
-      (Math.random() - 0.5) * 0.30,
-      (Math.random() - 0.5) * 0.24,
+      (Math.random() - 0.5) * 0.13,
+      (Math.random() - 0.5) * 0.10,
       0.14
     ));
-    setTimeout(() => emitHeadwearSpark(sparkPoint, smokeType), 30 + i * 34);
+    setTimeout(() => emitHeadwearSpark(sparkPoint, smokeType), 25 + i * 15);
   }
 }
 
@@ -1105,7 +1108,7 @@ function emitHeadwearSpark(worldPoint, smokeType) {
   spark.style.left = `${(projectedTip.x * 0.5 + 0.5) * stage.clientWidth}px`;
   spark.style.top = `${(-projectedTip.y * 0.5 + 0.5) * stage.clientHeight}px`;
   spark.style.setProperty('--spark-turn', `${Math.round(Math.random() * 150 - 75)}deg`);
-  spark.style.setProperty('--spark-length', `${34 + Math.round(Math.random() * 42)}px`);
+  spark.style.setProperty('--spark-length', `${26 + Math.round(Math.random() * 28)}px`);
   smokeLayer.append(spark);
   spark.addEventListener('animationend', () => spark.remove(), { once: true });
 }

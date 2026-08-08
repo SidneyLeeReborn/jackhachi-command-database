@@ -197,13 +197,13 @@ header p {
   position: absolute;
   z-index: 2;
   width: var(--spark-length);
-  height: 9px;
+  height: 3px;
   pointer-events: none;
   opacity: 0;
   transform-origin: 0 50%;
   background: #f8ffff;
   clip-path: polygon(0 38%, 31% 0, 42% 38%, 68% 5%, 56% 55%, 100% 42%, 63% 100%, 48% 66%, 24% 100%);
-  filter: drop-shadow(0 0 3px currentColor);
+  filter: drop-shadow(0 0 2px currentColor);
   animation: headwear-spark .38s steps(2, end) forwards;
 }
 
