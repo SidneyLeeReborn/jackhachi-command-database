@@ -156,6 +156,7 @@ const DAMPING = 5.8;
 const JOINT_SCALE = 7;
 const JOINT_LOOSE_POSITION = new THREE.Vector3(-0.56, -0.43, 0.92);
 const JOINT_LOOSE_ROTATION = THREE.MathUtils.degToRad(-8);
+const JOINT_MOUTH_ANCHOR = new THREE.Vector3(0, -0.53, 0.55);
 const ALTERED_FACE_DELAY = 4000;
 const ALTERED_FACE_FADE_IN = 60000;
 const ALTERED_FACE_FADE_OUT = 3000;
@@ -1090,33 +1091,6 @@ function emitHeadwearPoof(headwearRoot) {
     ));
     setTimeout(() => emitSmokeAtWorld(point, true, true, 3.8, smokeType), i * 18);
   }
-  const sparkCentre = centre.clone().add(new THREE.Vector3(0.052, -0.048, 0.14));
-  for (let i = 0; i < 40; i++) {
-    const angle = i / 40 * 360 + (Math.random() - 0.5) * 5;
-    setTimeout(() => emitHeadwearSpark(sparkCentre, smokeType, angle), 18 + i * 8);
-  }
-}
-
-function emitHeadwearSpark(worldPoint, smokeType, angle) {
-  projectedTip.copy(worldPoint).project(camera);
-  if (projectedTip.z < -1 || projectedTip.z > 1) return;
-  const spark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  spark.setAttribute('class', `headwear-spark ${smokeType}-spark`);
-  spark.setAttribute('viewBox', '0 0 100 20');
-  spark.setAttribute('preserveAspectRatio', 'none');
-  const bolt = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-  bolt.setAttribute('points', `0,10 17,${5 + Math.random() * 4} 34,${12 + Math.random() * 5} 51,${3 + Math.random() * 4} 68,${12 + Math.random() * 5} 84,${5 + Math.random() * 4} 100,10`);
-  bolt.setAttribute('fill', 'none');
-  bolt.setAttribute('stroke', 'currentColor');
-  bolt.setAttribute('stroke-width', '1.35');
-  bolt.setAttribute('vector-effect', 'non-scaling-stroke');
-  spark.append(bolt);
-  spark.style.left = `${(projectedTip.x * 0.5 + 0.5) * stage.clientWidth}px`;
-  spark.style.top = `${(-projectedTip.y * 0.5 + 0.5) * stage.clientHeight}px`;
-  spark.style.setProperty('--spark-turn', `${angle}deg`);
-  spark.style.setProperty('--spark-length', `${52 + Math.round(Math.random() * 36)}px`);
-  smokeLayer.append(spark);
-  spark.addEventListener('animationend', () => spark.remove(), { once: true });
 }
 
 function toggleJointItem() {
@@ -1153,42 +1127,17 @@ function detachBandana() {
 }
 
 function snapJointToHeadSurface() {
-  if (!jointRoot || !jointContact || !modelPivot || !head || !positions) return;
+  if (!jointRoot || !jointContact || !modelPivot) return;
   const contactWorld = jointContact.getWorldPosition(new THREE.Vector3());
-  const targetLocal = head.worldToLocal(contactWorld.clone());
-  const mouthLocal = head.worldToLocal(modelPivot.localToWorld(new THREE.Vector3(0, -0.52, 0.52)));
-  let nearestDistance = Infinity;
-  for (let i = 0; i < positions.count; i++) {
-    tempVertex.fromArray(positions.array, i * 3);
-    // Only lip/mouth vertices are legal anchors. This prevents the broad
-    // contact tolerance from accepting the nose before reaching the mouth.
-    if (tempVertex.distanceToSquared(mouthLocal) > 0.22 * 0.22) continue;
-    const distance = tempVertex.distanceToSquared(targetLocal);
-    if (distance < nearestDistance) {
-      nearestDistance = distance;
-      jointAnchorIndex = i;
-    }
-  }
-  if (Math.sqrt(nearestDistance) > JOINT_CONTACT_DISTANCE) {
-    jointAnchorIndex = null;
-    return;
-  }
+  const mouthWorld = modelPivot.localToWorld(JOINT_MOUTH_ANCHOR.clone());
+  if (contactWorld.distanceTo(mouthWorld) > JOINT_CONTACT_DISTANCE) return;
 
   modelPivot.attach(jointRoot);
   jointRoot.scale.setScalar(JOINT_SCALE);
   const contactInPivot = modelPivot.worldToLocal(contactWorld.clone());
   const contactFromRoot = contactInPivot.sub(jointRoot.position);
-  tempVertex.fromArray(positions.array, jointAnchorIndex * 3);
-  head.localToWorld(tempVertex);
-  surfacePointWorld.copy(tempVertex);
-  modelPivot.worldToLocal(tempVertex);
-  tempNormal.fromBufferAttribute(head.geometry.attributes.normal, jointAnchorIndex);
-  normalMatrix.getNormalMatrix(head.matrixWorld);
-  tempNormal.applyNormalMatrix(normalMatrix).normalize();
-  surfacePointWorld.add(tempNormal);
-  modelPivot.worldToLocal(surfacePointWorld);
-  jointSnapOffset.subVectors(surfacePointWorld, tempVertex).normalize().multiplyScalar(0.008).sub(contactFromRoot);
-  jointRoot.position.copy(tempVertex).add(jointSnapOffset);
+  jointRoot.position.copy(JOINT_MOUTH_ANCHOR).sub(contactFromRoot);
+  jointAnchorIndex = null;
   jointSnapped = true;
   jointSnappedAt = performance.now();
   nextNoseExhaleAt = jointSnappedAt + 6500;
@@ -1399,6 +1348,12 @@ function animate() {
     jointDropVelocity -= 4.8 * dt;
     jointRoot.position.y += jointDropVelocity * dt;
     jointRoot.rotation.z += 1.8 * dt;
+    jointRoot.getWorldPosition(jointTipWorld);
+    projectedTip.copy(jointTipWorld).project(camera);
+    eyeLookTarget.set(
+      THREE.MathUtils.clamp(projectedTip.x, -1, 1),
+      THREE.MathUtils.clamp(projectedTip.y, -1, 1)
+    );
     if (jointRoot.position.y <= JOINT_LOOSE_POSITION.y) {
       jointRoot.position.y = JOINT_LOOSE_POSITION.y;
       jointRoot.position.x = JOINT_LOOSE_POSITION.x;
@@ -1409,6 +1364,7 @@ function animate() {
       } else {
         jointDropping = false;
         jointDropSettling = true;
+        eyeLookTarget.set(0, 0);
         jointDropVelocity = 0;
         jointDropBounces = 0;
       }
