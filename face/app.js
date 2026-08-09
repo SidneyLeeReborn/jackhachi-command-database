@@ -74,9 +74,11 @@ const pupils = [];
 const jointTransform = new TransformControls(camera, canvas);
 jointTransform.setMode('rotate');
 jointTransform.setSpace('local');
-jointTransform.setSize(0.72);
+jointTransform.setSize(0.44);
 jointTransform.enabled = true;
 scene.add(jointTransform.getHelper());
+// TransformControls includes enormous axis guide lines. Keep only the compact rings.
+jointTransform._gizmo?.helper?.rotate?.clear();
 
 let head = null;
 let modelPivot = null;
@@ -101,8 +103,6 @@ let jointSnapped = false;
 let jointSnappedAt = 0;
 let jointAnchorIndex = null;
 let jointDragOffset = new THREE.Vector3();
-const jointRotatePointerStart = new THREE.Vector2();
-const jointRotateEulerStart = new THREE.Euler();
 let nextSmokeAt = 0;
 let nextNoseExhaleAt = 0;
 let noseExhaleUntil = 0;
@@ -936,6 +936,7 @@ function releaseGroan() {
 function beginDrag(event) {
   if (!head || activePointer !== null) return;
   if (jointTransform.axis) return;
+  if (event.button === 0 && jointTransform.object) jointTransform.detach();
   setPointer(event);
   raycaster.setFromCamera(pointer, camera);
   if (paintMode) {
@@ -952,18 +953,17 @@ function beginDrag(event) {
     const jointHit = raycaster.intersectObject(jointRoot, true)[0];
     if (jointHit) {
       event.preventDefault();
-      const rotateJoint = event.button === 2 || event.shiftKey;
-      if (jointSnapped && !rotateJoint) detachJoint();
+      if (event.button === 2) {
+        jointTransform.attach(jointRoot);
+        return;
+      }
+      if (event.button !== 0) return;
+      if (jointSnapped) detachJoint();
       activePointer = event.pointerId;
       canvas.setPointerCapture(event.pointerId);
       dragging = true;
-      dragMode = rotateJoint ? 'joint-rotate' : 'joint';
+      dragMode = 'joint';
       stage.classList.add('grabbing');
-      if (rotateJoint) {
-        jointRotatePointerStart.set(event.clientX, event.clientY);
-        jointRotateEulerStart.copy(jointRoot.rotation);
-        return;
-      }
       camera.getWorldDirection(cameraDirection);
       dragPlane.setFromNormalAndCoplanarPoint(cameraDirection, jointRoot.position);
       jointDragOffset.subVectors(jointRoot.position, jointHit.point);
@@ -1010,14 +1010,6 @@ function moveDrag(event) {
   raycaster.setFromCamera(pointer, camera);
   if (dragMode === 'paint') {
     paintAtPointer();
-    return;
-  }
-  if (dragMode === 'joint-rotate') {
-    const dx = event.clientX - jointRotatePointerStart.x;
-    const dy = event.clientY - jointRotatePointerStart.y;
-    jointRoot.rotation.x = jointRotateEulerStart.x + dy * 0.012;
-    jointRoot.rotation.y = jointRotateEulerStart.y + dx * 0.012;
-    if (jointSnapped) anchorJointContactToMouth();
     return;
   }
   if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return;
@@ -1128,7 +1120,6 @@ function toggleJointItem() {
     return;
   }
   jointRoot.visible = true;
-  jointTransform.attach(jointRoot);
   jointDropping = true;
   jointDropVelocity = 0;
   jointDropBounces = 0;
@@ -1293,15 +1284,6 @@ canvas.addEventListener('pointerleave', () => {
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 canvas.addEventListener('contextmenu', (event) => event.preventDefault());
-canvas.addEventListener('wheel', (event) => {
-  if (!jointRoot?.visible || jointSpitting) return;
-  setPointer(event);
-  raycaster.setFromCamera(pointer, camera);
-  if (!raycaster.intersectObject(jointRoot, true)[0]) return;
-  event.preventDefault();
-  jointRoot.rotation.z += Math.sign(event.deltaY) * 0.12;
-  if (jointSnapped) anchorJointContactToMouth();
-}, { passive: false });
 jointTransform.addEventListener('objectChange', () => {
   if (jointSnapped) anchorJointContactToMouth();
 });
