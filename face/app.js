@@ -117,6 +117,8 @@ let smileAmount = 0;
 let lastSmileAmount = 0;
 let smileVertices = [];
 let stonerVertices = [];
+let blinkVertices = [];
+let stonerWeights = null;
 let turnAngle = 0;
 let headPitch = 0;
 let duragRoot = null;
@@ -159,7 +161,7 @@ let groanLoopStart = 0.25;
 let groanLoopEnd = 0.68;
 let nextBlinkAt = performance.now() + 10000;
 let blinkStartedAt = -Infinity;
-let nextIdleStateAt = performance.now() + 7000;
+let nextIdleStateAt = performance.now() + 9000;
 let idleState = -1;
 let idleStateStartedAt = 0;
 let idleStateUntil = 0;
@@ -236,6 +238,7 @@ new GLTFLoader().load(
     modelPivot.updateMatrixWorld(true);
     buildSmileMap();
     buildStonerMap();
+    buildBlinkMap();
     setupPaintLayer();
 
     Promise.all([
@@ -748,6 +751,36 @@ function buildStonerMap() {
     }
   }
   stonerVertices = [...chosen].map(([index, weight]) => ({ index, weight }));
+  stonerWeights = new Float32Array(positions.count);
+  for (const vertex of stonerVertices) stonerWeights[vertex.index] = vertex.weight;
+}
+
+function buildBlinkMap() {
+  if (!head || !modelPivot || !positions || !rest) return;
+  const chosen = new Map();
+  for (const spec of EYE_SPECS) {
+    const centre = head.worldToLocal(modelPivot.localToWorld(
+      new THREE.Vector3(spec.x, spec.y, spec.z)
+    ));
+    for (let i = 0; i < positions.count; i++) {
+      tempVertex.fromArray(rest, i * 3);
+      const dx = (tempVertex.x - centre.x) / 0.16;
+      const dy = (tempVertex.y - centre.y) / 0.105;
+      const dz = (tempVertex.z - centre.z) / 0.13;
+      const distance = dx * dx + dy * dy + dz * dz;
+      if (distance >= 1) continue;
+      const t = 1 - Math.sqrt(distance);
+      const weight = t * t * (3 - 2 * t);
+      const candidate = {
+        index: i,
+        targetY: centre.y - tempVertex.y,
+        weight
+      };
+      const previous = chosen.get(i);
+      if (!previous || weight > previous.weight) chosen.set(i, candidate);
+    }
+  }
+  blinkVertices = [...chosen.values()];
 }
 
 async function prepareGroan() {
@@ -946,6 +979,10 @@ function beginDrag(event) {
   if (event.button === 0 && jointTransform.object) jointTransform.detach();
   setPointer(event);
   raycaster.setFromCamera(pointer, camera);
+  const jointHit = jointRoot && !jointSpitting
+    ? raycaster.intersectObject(jointRoot, true)[0]
+    : null;
+  if (paintMode && jointHit) setPaintMode(false);
   if (paintMode) {
     event.preventDefault();
     activePointer = event.pointerId;
@@ -957,7 +994,6 @@ function beginDrag(event) {
     return;
   }
   if (jointRoot && !jointSpitting) {
-    const jointHit = raycaster.intersectObject(jointRoot, true)[0];
     if (jointHit) {
       event.preventDefault();
       if (event.button === 2) {
@@ -1348,8 +1384,8 @@ bandanaButton.addEventListener('click', () => {
   if (bandanaEquipped) detachBandana();
   else equipBandana();
 });
-paintToggle.addEventListener('click', () => {
-  paintMode = !paintMode;
+function setPaintMode(enabled) {
+  paintMode = enabled;
   paintToggle.setAttribute('aria-pressed', String(paintMode));
   paintOptions.hidden = !paintMode;
   stage.classList.toggle('painting', paintMode);
@@ -1358,6 +1394,9 @@ paintToggle.addEventListener('click', () => {
     stage.classList.remove('brush-over-head');
     document.querySelectorAll('.paint-panel').forEach((panel) => { panel.hidden = true; });
   }
+}
+paintToggle.addEventListener('click', () => {
+  setPaintMode(!paintMode);
 });
 paintSize.addEventListener('input', () => { paintSizeValue.value = paintSize.value; });
 paintHardness.addEventListener('input', () => { paintHardnessValue.value = `${paintHardness.value}%`; });
@@ -1436,14 +1475,14 @@ function animate() {
 
   if ((dragging || jointDropping) && idleState !== -1) {
     idleState = -1;
-    nextIdleStateAt = now + 6500;
+    nextIdleStateAt = now + 8500;
   } else if (!dragging && !jointDropping && idleState === -1 && now >= nextIdleStateAt) {
-    idleState = Math.floor(Math.random() * 10);
+    idleState = Math.floor(Math.random() * 20);
     idleStateStartedAt = now;
     idleStateUntil = now + 1800 + Math.random() * 1300;
   } else if (idleState !== -1 && now >= idleStateUntil) {
     idleState = -1;
-    nextIdleStateAt = now + 7000 + Math.random() * 7000;
+    nextIdleStateAt = now + 9100 + Math.random() * 9100;
   }
 
   let idleLookX = 0;
@@ -1472,6 +1511,16 @@ function animate() {
         idleYaw = idleLookX * 0.07;
         break;
       case 9: idleLookY = 0.18 * envelope; idlePitch = -0.025 * envelope; idleRoll = 0.018 * envelope; break;
+      case 10: idleYaw = Math.sin(progress * Math.PI * 2) * 0.13 * envelope; idleLookX = -idleYaw * 4; break;
+      case 11: idlePitch = -Math.abs(wave) * 0.075 * envelope; idleLookY = 0.55 * envelope; break;
+      case 12: idleRoll = Math.sin(progress * Math.PI * 6) * 0.035 * envelope; idleBob = Math.abs(wave) * 0.014 * envelope; break;
+      case 13: idleLookX = Math.sign(Math.sin(progress * Math.PI * 5)) * 0.70 * envelope; break;
+      case 14: idleLookY = Math.sign(Math.sin(progress * Math.PI * 3)) * 0.48 * envelope; idlePitch = -idleLookY * 0.055; break;
+      case 15: idleYaw = -0.075 * envelope; idleRoll = 0.055 * envelope; idleLookX = 0.52 * envelope; break;
+      case 16: idleYaw = 0.075 * envelope; idleRoll = -0.055 * envelope; idleLookX = -0.52 * envelope; break;
+      case 17: idleBob = Math.sin(progress * Math.PI * 10) * 0.012 * envelope; idleRoll = wave * 0.028 * envelope; break;
+      case 18: idleYaw = wave * 0.055 * envelope; idlePitch = Math.cos(progress * Math.PI * 4) * 0.035 * envelope; break;
+      case 19: idleLookX = wave * 0.28 * envelope; idleLookY = Math.abs(wave) * 0.30 * envelope; idleBob = Math.abs(wave) * 0.012 * envelope; break;
     }
   }
   effectiveEyeLookTarget.set(
@@ -1691,6 +1740,20 @@ function animate() {
     positions.needsUpdate = true;
   }
 
+  if (positions && blinkVertices.length) {
+    for (const vertex of blinkVertices) {
+      const i3 = vertex.index * 3;
+      const stonerWeight = stonerWeights ? stonerWeights[vertex.index] : 0;
+      positions.array[i3 + 1] = rest[i3 + 1] + offsets[i3 + 1]
+        - 0.052 * stonerWeight * smileAmount
+        + vertex.targetY * vertex.weight * blinkAmount;
+      positions.array[i3 + 2] = rest[i3 + 2] + offsets[i3 + 2]
+        + 0.006 * stonerWeight * smileAmount
+        + 0.006 * vertex.weight * blinkAmount;
+    }
+    positions.needsUpdate = true;
+  }
+
   eyeLook.lerp(effectiveEyeLookTarget, 1 - Math.exp(-10 * dt));
   for (const eye of pupils) {
     const index = eye.anchor * 3;
@@ -1700,11 +1763,8 @@ function animate() {
     eye.group.position.y += eye.offsetY;
     eye.group.position.z += eye.offsetZ;
     eye.group.quaternion.identity();
-    eye.group.scale.set(
-      eye.size,
-      eye.size * (1 - smileAmount * 0.20) * THREE.MathUtils.lerp(1, 0.055, blinkAmount),
-      eye.size
-    );
+    eye.group.visible = blinkAmount < 0.48;
+    eye.group.scale.set(eye.size, eye.size * (1 - smileAmount * 0.20), eye.size);
     const headTurnLook = -Math.sin(turnAngle) * 0.020;
     const lookX = THREE.MathUtils.clamp(eyeLook.x * 0.016 + headTurnLook, -0.026, 0.026);
     const lookY = eyeLook.y * 0.007;

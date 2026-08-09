@@ -97,6 +97,8 @@ header p {
 }
 
 .paint-tools button { padding: 4px 7px; font-size: 10px; }
+.paint-tools #paint-toggle { display: inline-flex; align-items: center; gap: 4px; }
+.paint-tools #paint-toggle img { width: 16px; height: 16px; object-fit: contain; image-rendering: pixelated; }
 .paint-tools > button[aria-pressed="true"] { border-style: inset; background: #ffff00; }
 .paint-options {
   position: relative;
