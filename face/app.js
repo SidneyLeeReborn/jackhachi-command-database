@@ -26,10 +26,6 @@ const paintUndo = document.querySelector('#paint-undo');
 const paintRedo = document.querySelector('#paint-redo');
 const paintClear = document.querySelector('#paint-clear');
 const paintCursor = document.querySelector('#paint-cursor');
-const jointSnapX = document.querySelector('#joint-snap-x');
-const jointSnapY = document.querySelector('#joint-snap-y');
-const jointSnapZ = document.querySelector('#joint-snap-z');
-const jointSnapReadout = document.querySelector('#joint-snap-readout');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
@@ -167,10 +163,14 @@ const SPRING = 54;
 const DAMPING = 5.8;
 const JOINT_SCALE = 7;
 const JOINT_LOOSE_POSITION = new THREE.Vector3(-0.56, -0.43, 0.92);
-const JOINT_MOUTH_ANCHOR = new THREE.Vector3(0, -0.53, 0.55);
+const JOINT_LIP_CENTER = new THREE.Vector3(0, -0.53, 0.55);
+const JOINT_MOUTH_ANCHOR = JOINT_LIP_CENTER.clone();
+const JOINT_LIP_RADIUS_X = 0.30;
+const JOINT_LIP_RADIUS_Y = 0.13;
+const JOINT_LIP_CAPTURE_X = 0.42;
+const JOINT_LIP_CAPTURE_Y = 0.23;
 const jointRestRotation = new THREE.Euler(0, 0, THREE.MathUtils.degToRad(-8));
 const jointContactFromRoot = new THREE.Vector3();
-const JOINT_CONTACT_DISTANCE = 0.55;
 const ALTERED_FACE_DELAY = 4000;
 const ALTERED_FACE_FADE_IN = 60000;
 const ALTERED_FACE_FADE_OUT = 3000;
@@ -1147,8 +1147,25 @@ function detachBandana() {
 function snapJointToHeadSurface() {
   if (!jointRoot || !jointContact || !modelPivot) return;
   const contactWorld = jointContact.getWorldPosition(new THREE.Vector3());
-  const mouthWorld = modelPivot.localToWorld(JOINT_MOUTH_ANCHOR.clone());
-  if (contactWorld.distanceTo(mouthWorld) > JOINT_CONTACT_DISTANCE) return;
+  const contactLocal = modelPivot.worldToLocal(contactWorld.clone());
+  const dx = contactLocal.x - JOINT_LIP_CENTER.x;
+  const dy = contactLocal.y - JOINT_LIP_CENTER.y;
+  const captureDistance = (dx * dx) / (JOINT_LIP_CAPTURE_X * JOINT_LIP_CAPTURE_X)
+    + (dy * dy) / (JOINT_LIP_CAPTURE_Y * JOINT_LIP_CAPTURE_Y);
+  if (captureDistance > 1) return;
+
+  // Every point in the painted lip shape is valid. Preserve an inside drop;
+  // pull a near miss only as far as the nearest edge of that lip ellipse.
+  const lipDistance = Math.sqrt(
+    (dx * dx) / (JOINT_LIP_RADIUS_X * JOINT_LIP_RADIUS_X)
+    + (dy * dy) / (JOINT_LIP_RADIUS_Y * JOINT_LIP_RADIUS_Y)
+  );
+  const lipScale = lipDistance > 1 ? 1 / lipDistance : 1;
+  JOINT_MOUTH_ANCHOR.set(
+    JOINT_LIP_CENTER.x + dx * lipScale,
+    JOINT_LIP_CENTER.y + dy * lipScale,
+    JOINT_LIP_CENTER.z
+  );
 
   modelPivot.attach(jointRoot);
   jointRoot.scale.setScalar(JOINT_SCALE);
@@ -1288,21 +1305,6 @@ jointTransform.addEventListener('objectChange', () => {
   if (jointSnapped) anchorJointContactToMouth();
 });
 
-function updateJointSnapCalibration() {
-  JOINT_MOUTH_ANCHOR.set(
-    Number(jointSnapX.value),
-    Number(jointSnapY.value),
-    Number(jointSnapZ.value)
-  );
-  jointSnapX.nextElementSibling.value = JOINT_MOUTH_ANCHOR.x.toFixed(3);
-  jointSnapY.nextElementSibling.value = JOINT_MOUTH_ANCHOR.y.toFixed(3);
-  jointSnapZ.nextElementSibling.value = JOINT_MOUTH_ANCHOR.z.toFixed(3);
-  jointSnapReadout.value = `X ${JOINT_MOUTH_ANCHOR.x.toFixed(3)} | Y ${JOINT_MOUTH_ANCHOR.y.toFixed(3)} | Z ${JOINT_MOUTH_ANCHOR.z.toFixed(3)}`;
-  if (jointSnapped) anchorJointContactToMouth();
-}
-for (const input of [jointSnapX, jointSnapY, jointSnapZ]) {
-  input.addEventListener('input', updateJointSnapCalibration);
-}
 if (resetButton) resetButton.addEventListener('click', restoreFactoryFace);
 jointButton.addEventListener('click', toggleJointItem);
 duragButton.addEventListener('click', () => {

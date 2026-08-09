@@ -211,21 +211,6 @@ header p {
   margin: 12px 0;
 }
 
-.joint-snap-calibration {
-  max-width: 620px;
-  margin: 0 auto 12px;
-  padding: 8px;
-  border: 3px outset #ddd;
-  background: #c0c0c0;
-  color: #000;
-  font: bold 11px "MS Sans Serif", Arial, sans-serif;
-}
-.joint-snap-calibration strong { display: block; margin-bottom: 6px; color: #760000; text-align: center; }
-.joint-snap-calibration label { display: grid; grid-template-columns: 18px 1fr 58px; align-items: center; gap: 7px; margin: 4px 0; }
-.joint-snap-calibration input { width: 100%; }
-.joint-snap-calibration label output { text-align: right; }
-#joint-snap-readout { display: block; margin-top: 7px; padding: 5px; border: 2px inset #ddd; background: #fff; text-align: center; font-family: "Courier New", monospace; }
-
 button {
   padding: 7px 13px;
   border: 3px outset #ddd;
