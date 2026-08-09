@@ -28,7 +28,7 @@ const paintClear = document.querySelector('#paint-clear');
 const paintCursor = document.querySelector('#paint-cursor');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.35));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.18;
@@ -118,7 +118,8 @@ let lastSmileAmount = 0;
 let smileVertices = [];
 let stonerVertices = [];
 let blinkVertices = [];
-let stonerWeights = null;
+let combinedDeformationVertices = [];
+let lastBlinkAmount = 0;
 let turnAngle = 0;
 let headPitch = 0;
 let duragRoot = null;
@@ -140,6 +141,8 @@ let paintTextureUpdateQueued = false;
 let paintStampKey = '';
 let paintHistory = [];
 let paintRedoHistory = [];
+let paintHasContent = false;
+const smokePool = [];
 const paintBaseCanvas = document.createElement('canvas');
 const paintStrokeCanvas = document.createElement('canvas');
 const paintStampCanvas = document.createElement('canvas');
@@ -239,11 +242,12 @@ new GLTFLoader().load(
     buildSmileMap();
     buildStonerMap();
     buildBlinkMap();
+    buildCombinedDeformationMap();
     setupPaintLayer();
 
     Promise.all([
-      textureLoader.loadAsync('./shaded2.png?v=1'),
-      textureLoader.loadAsync('./shaded3.png?v=1')
+      textureLoader.loadAsync('./shaded2.webp?v=optimized-1'),
+      textureLoader.loadAsync('./shaded3.webp?v=optimized-1')
     ]).then(([normalTexture, alteredTexture]) => {
       for (const texture of [normalTexture, alteredTexture]) {
         texture.colorSpace = THREE.SRGBColorSpace;
@@ -283,6 +287,7 @@ new GLTFLoader().load(
       alteredFace.scale.copy(head.scale);
       alteredFace.renderOrder = head.renderOrder + 1;
       alteredFace.frustumCulled = false;
+      alteredFace.visible = false;
       head.parent.add(alteredFace);
 
       addTrackingEyes();
@@ -336,6 +341,7 @@ new GLTFLoader().load(
       inhaleTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
       jointInhaleVisual = gltf.scene.clone(true);
       jointInhaleVisual.name = 'JOINT_INHALE_TEXTURE_OVERLAY';
+      jointInhaleVisual.visible = false;
       jointInhaleMaterials = [];
       jointInhaleVisual.traverse((object) => {
         if (!object.isMesh) return;
@@ -441,6 +447,7 @@ function setupPaintLayer() {
   paintLayer.scale.copy(head.scale);
   paintLayer.renderOrder = head.renderOrder + 2;
   paintLayer.frustumCulled = false;
+  paintLayer.visible = false;
   head.parent.add(paintLayer);
   recordPaintState();
 }
@@ -452,7 +459,10 @@ function updatePaintHistoryButtons() {
 
 function recordPaintState() {
   if (!paintBaseContext) return;
-  paintHistory.push(paintBaseContext.getImageData(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE));
+  paintHistory.push({
+    image: paintBaseContext.getImageData(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE),
+    hasContent: paintHasContent
+  });
   if (paintHistory.length > PAINT_HISTORY_LIMIT) paintHistory.shift();
   paintRedoHistory = [];
   updatePaintHistoryButtons();
@@ -460,7 +470,9 @@ function recordPaintState() {
 
 function restorePaintState(snapshot) {
   if (!snapshot || !paintBaseContext || !paintContext || !paintStrokeContext) return;
-  paintBaseContext.putImageData(snapshot, 0, 0);
+  paintBaseContext.putImageData(snapshot.image, 0, 0);
+  paintHasContent = snapshot.hasContent;
+  if (paintLayer) paintLayer.visible = paintHasContent;
   paintStrokeContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
   paintContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
   paintContext.drawImage(paintBaseCanvas, 0, 0);
@@ -503,6 +515,8 @@ function buildPaintStamp(width) {
 }
 
 function stampPaint(point, width, stampSize) {
+  paintHasContent = true;
+  if (paintLayer) paintLayer.visible = true;
   paintStrokeContext.drawImage(paintStampCanvas, point.x - stampSize * 0.5, point.y - stampSize * 0.5);
   const half = stampSize * 0.5 + 2;
   if (!paintDirtyBounds) {
@@ -566,6 +580,8 @@ function commitPaintStroke() {
   paintBaseContext.globalAlpha = activePaintOpacity;
   paintBaseContext.drawImage(paintStrokeCanvas, x, y, width, height, x, y, width, height);
   paintBaseContext.restore();
+  paintHasContent = true;
+  if (paintLayer) paintLayer.visible = true;
   paintStrokeContext.clearRect(x, y, width, height);
   renderPaintComposite(false);
   paintDirtyBounds = null;
@@ -604,7 +620,7 @@ function paintAtPointer() {
 }
 
 function updatePaintCursor(event) {
-  if (!paintMode || !head) return;
+  if (!paintMode || !head || dragging) return;
   setPointer(event);
   raycaster.setFromCamera(pointer, camera);
   const headHit = raycaster.intersectObject(head, false)[0];
@@ -757,8 +773,6 @@ function buildStonerMap() {
     }
   }
   stonerVertices = [...chosen].map(([index, weight]) => ({ index, weight }));
-  stonerWeights = new Float32Array(positions.count);
-  for (const vertex of stonerVertices) stonerWeights[vertex.index] = vertex.weight;
 }
 
 function buildBlinkMap() {
@@ -787,6 +801,26 @@ function buildBlinkMap() {
     }
   }
   blinkVertices = [...chosen.values()];
+}
+
+function buildCombinedDeformationMap() {
+  const combined = new Map();
+  const getEntry = (index) => {
+    if (!combined.has(index)) combined.set(index, { index, smileWeight: 0, smileSide: 0, stonerWeight: 0, blinkWeight: 0, blinkTargetY: 0 });
+    return combined.get(index);
+  };
+  for (const vertex of smileVertices) {
+    const entry = getEntry(vertex.index);
+    entry.smileWeight = vertex.weight;
+    entry.smileSide = vertex.side;
+  }
+  for (const vertex of stonerVertices) getEntry(vertex.index).stonerWeight = vertex.weight;
+  for (const vertex of blinkVertices) {
+    const entry = getEntry(vertex.index);
+    entry.blinkWeight = vertex.weight;
+    entry.blinkTargetY = vertex.targetY;
+  }
+  combinedDeformationVertices = [...combined.values()];
 }
 
 async function prepareGroan() {
@@ -1318,7 +1352,7 @@ function emitNoseSmoke(side = 1) {
 function emitSmokeAtWorld(worldPoint, fromNose, heavy = false, sizeMultiplier = 1, headwearType = '') {
   projectedTip.copy(worldPoint).project(camera);
   if (projectedTip.z < -1 || projectedTip.z > 1) return;
-  const puff = document.createElement('span');
+  const puff = smokePool.pop() || document.createElement('span');
   puff.className = `smoke-puff${fromNose ? ' nose-smoke' : ''}${headwearType ? ` headwear-smoke ${headwearType}-smoke` : ''}`;
   puff.style.left = `${(projectedTip.x * 0.5 + 0.5) * stage.clientWidth}px`;
   puff.style.top = `${(-projectedTip.y * 0.5 + 0.5) * stage.clientHeight}px`;
@@ -1332,7 +1366,10 @@ function emitSmokeAtWorld(worldPoint, fromNose, heavy = false, sizeMultiplier = 
   puff.style.setProperty('--smoke-turn', `${Math.round(Math.random() * 34 - 17)}deg`);
   puff.style.setProperty('--smoke-turn-end', `${Math.round(Math.random() * 70 - 35)}deg`);
   smokeLayer.append(puff);
-  puff.addEventListener('animationend', () => puff.remove(), { once: true });
+  puff.addEventListener('animationend', () => {
+    puff.remove();
+    if (smokePool.length < 80) smokePool.push(puff);
+  }, { once: true });
 }
 
 function restoreFactoryFace() {
@@ -1365,9 +1402,22 @@ function restoreFactoryFace() {
 }
 
 canvas.addEventListener('pointerdown', beginDrag);
+let pendingPaintCursorEvent = null;
+let paintCursorFrameQueued = false;
+function schedulePaintCursorUpdate(event) {
+  if (!paintMode || dragging) return;
+  pendingPaintCursorEvent = { clientX: event.clientX, clientY: event.clientY };
+  if (paintCursorFrameQueued) return;
+  paintCursorFrameQueued = true;
+  requestAnimationFrame(() => {
+    paintCursorFrameQueued = false;
+    if (pendingPaintCursorEvent) updatePaintCursor(pendingPaintCursorEvent);
+    pendingPaintCursorEvent = null;
+  });
+}
 canvas.addEventListener('pointermove', moveDrag);
 canvas.addEventListener('pointermove', aimEyes);
-canvas.addEventListener('pointermove', updatePaintCursor);
+canvas.addEventListener('pointermove', schedulePaintCursorUpdate);
 canvas.addEventListener('pointerleave', () => {
   eyeLookTarget.set(0, 0);
   paintCursor.style.display = 'none';
@@ -1456,16 +1506,25 @@ paintClear.addEventListener('click', () => {
   paintBaseContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
   paintStrokeContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
   paintContext.clearRect(0, 0, PAINT_TEXTURE_SIZE, PAINT_TEXTURE_SIZE);
+  paintHasContent = false;
+  if (paintLayer) paintLayer.visible = false;
   paintDirtyBounds = null;
   queuePaintTextureUpdate();
   recordPaintState();
 });
 
-const clock = new THREE.Clock();
 let normalTimer = 0;
-function animate() {
+let lastFrameAt = 0;
+const FRAME_INTERVAL = 1000 / 30;
+function animate(frameTime = performance.now()) {
   requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 1 / 30);
+  if (document.hidden) {
+    lastFrameAt = frameTime;
+    return;
+  }
+  if (lastFrameAt && frameTime - lastFrameAt < FRAME_INTERVAL - 1) return;
+  const dt = lastFrameAt ? Math.min((frameTime - lastFrameAt) / 1000, 0.05) : FRAME_INTERVAL / 1000;
+  lastFrameAt = frameTime;
   const now = performance.now();
   idleTime += dt;
   entranceTime += dt;
@@ -1576,6 +1635,7 @@ function animate() {
   );
   if (Math.abs(alteredTarget - alteredFaceOpacity) < 0.001) alteredFaceOpacity = alteredTarget;
   if (alteredFace) {
+    alteredFace.visible = alteredFaceOpacity > 0.001;
     const materials = Array.isArray(alteredFace.material) ? alteredFace.material : [alteredFace.material];
     for (const material of materials) material.opacity = alteredFaceOpacity;
   }
@@ -1625,6 +1685,7 @@ function animate() {
 
     const inhalePhase = ((now - jointSnappedAt) % INHALE_CYCLE) / INHALE_CYCLE;
     const inhale = inhalePhase < 0.28 ? Math.sin(inhalePhase / 0.28 * Math.PI) : 0;
+    if (jointInhaleVisual) jointInhaleVisual.visible = inhale > 0.01;
     for (const material of jointInhaleMaterials) material.opacity = inhale * 0.9;
 
     // A pull produces a thick cluster at the tip; idle burning stays restrained.
@@ -1649,6 +1710,7 @@ function animate() {
     }
     if (smokedFraction >= 1) spitFinishedJoint(now);
   } else if (jointInhaleMaterials.length) {
+    if (jointInhaleVisual) jointInhaleVisual.visible = false;
     for (const material of jointInhaleMaterials) material.opacity = 0;
   }
 
@@ -1660,6 +1722,7 @@ function animate() {
     if (now - jointSpitAt > 1450) retireFinishedJoint();
   }
 
+  let geometryDirty = false;
   if (positions && fullFaceRecoveryAt && now >= fullFaceRecoveryAt && dragMode !== 'face') {
     const recovery = Math.exp(-2.15 * dt);
     let stillRecovering = false;
@@ -1670,7 +1733,7 @@ function animate() {
       else stillRecovering = true;
       positions.array[i] = rest[i] + offsets[i];
     }
-    positions.needsUpdate = true;
+    geometryDirty = true;
     active = [];
     weights = [];
     if (!stillRecovering) fullFaceRecoveryAt = 0;
@@ -1705,59 +1768,42 @@ function animate() {
       positions.array[i3 + 1] = rest[i3 + 1] + offsets[i3 + 1];
       positions.array[i3 + 2] = rest[i3 + 2] + offsets[i3 + 2];
     }
-    positions.needsUpdate = true;
-    normalTimer += dt;
-    if (normalTimer > 0.05) {
-      head.geometry.computeVertexNormals();
-      normalTimer = 0;
-    }
+    geometryDirty = true;
     if (!moving) {
       active = [];
       weights = [];
     }
   }
 
-  if (positions && smileVertices.length) {
-    for (const vertex of smileVertices) {
+  const expressionChanged = Math.abs(smileAmount - lastSmileAmount) > 0.00001
+    || Math.abs(blinkAmount - lastBlinkAmount) > 0.00001;
+  if (positions && combinedDeformationVertices.length && (geometryDirty || expressionChanged)) {
+    for (const vertex of combinedDeformationVertices) {
       const i3 = vertex.index * 3;
-      const strength = vertex.weight * smileAmount;
-      positions.array[i3] = rest[i3] + offsets[i3] + vertex.side * 0.095 * strength;
-      positions.array[i3 + 1] = rest[i3 + 1] + offsets[i3 + 1] + 0.135 * strength;
-      positions.array[i3 + 2] = rest[i3 + 2] + offsets[i3 + 2] + 0.016 * strength;
-    }
-    positions.needsUpdate = true;
-    if (Math.abs(smileAmount - lastSmileAmount) > 0.00001) {
-      normalTimer += dt;
-      if (normalTimer > 0.05) {
-        head.geometry.computeVertexNormals();
-        normalTimer = 0;
-      }
-    }
-    lastSmileAmount = smileAmount;
-  }
-
-
-  if (positions && stonerVertices.length) {
-    for (const vertex of stonerVertices) {
-      const i3 = vertex.index * 3;
-      positions.array[i3 + 1] -= 0.052 * vertex.weight * smileAmount;
-      positions.array[i3 + 2] += 0.006 * vertex.weight * smileAmount;
-    }
-    positions.needsUpdate = true;
-  }
-
-  if (positions && blinkVertices.length) {
-    for (const vertex of blinkVertices) {
-      const i3 = vertex.index * 3;
-      const stonerWeight = stonerWeights ? stonerWeights[vertex.index] : 0;
+      const smileStrength = vertex.smileWeight * smileAmount;
+      positions.array[i3] = rest[i3] + offsets[i3]
+        + vertex.smileSide * 0.095 * smileStrength;
       positions.array[i3 + 1] = rest[i3 + 1] + offsets[i3 + 1]
-        - 0.052 * stonerWeight * smileAmount
-        + vertex.targetY * vertex.weight * blinkAmount;
+        + 0.135 * smileStrength
+        - 0.052 * vertex.stonerWeight * smileAmount
+        + vertex.blinkTargetY * vertex.blinkWeight * blinkAmount;
       positions.array[i3 + 2] = rest[i3 + 2] + offsets[i3 + 2]
-        + 0.006 * stonerWeight * smileAmount
-        + 0.006 * vertex.weight * blinkAmount;
+        + 0.016 * smileStrength
+        + 0.006 * vertex.stonerWeight * smileAmount
+        + 0.006 * vertex.blinkWeight * blinkAmount;
     }
+    geometryDirty = true;
+  }
+  lastSmileAmount = smileAmount;
+  lastBlinkAmount = blinkAmount;
+
+  if (positions && geometryDirty) {
     positions.needsUpdate = true;
+    normalTimer += dt;
+    if (normalTimer >= 0.066) {
+      head.geometry.computeVertexNormals();
+      normalTimer = 0;
+    }
   }
 
   eyeLook.lerp(effectiveEyeLookTarget, 1 - Math.exp(-10 * dt));
