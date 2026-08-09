@@ -1515,7 +1515,7 @@ paintClear.addEventListener('click', () => {
 
 let normalTimer = 0;
 let lastFrameAt = 0;
-const FRAME_INTERVAL = 1000 / 30;
+const FRAME_INTERVAL = 1000 / 60;
 function animate(frameTime = performance.now()) {
   requestAnimationFrame(animate);
   if (document.hidden) {
