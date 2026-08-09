@@ -28,7 +28,7 @@ const paintClear = document.querySelector('#paint-clear');
 const paintCursor = document.querySelector('#paint-cursor');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.35));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.18;
@@ -1515,15 +1515,13 @@ paintClear.addEventListener('click', () => {
 
 let normalTimer = 0;
 let lastFrameAt = 0;
-const FRAME_INTERVAL = 1000 / 60;
 function animate(frameTime = performance.now()) {
   requestAnimationFrame(animate);
   if (document.hidden) {
     lastFrameAt = frameTime;
     return;
   }
-  if (lastFrameAt && frameTime - lastFrameAt < FRAME_INTERVAL - 1) return;
-  const dt = lastFrameAt ? Math.min((frameTime - lastFrameAt) / 1000, 0.05) : FRAME_INTERVAL / 1000;
+  const dt = lastFrameAt ? Math.min((frameTime - lastFrameAt) / 1000, 0.05) : 1 / 60;
   lastFrameAt = frameTime;
   const now = performance.now();
   idleTime += dt;
@@ -1799,8 +1797,9 @@ function animate(frameTime = performance.now()) {
 
   if (positions && geometryDirty) {
     positions.needsUpdate = true;
+    const smoothNormalsNow = dragging || active.length > 0 || expressionChanged || blinkAmount > 0;
     normalTimer += dt;
-    if (normalTimer >= 0.066) {
+    if (smoothNormalsNow || normalTimer >= 0.066) {
       head.geometry.computeVertexNormals();
       normalTimer = 0;
     }
