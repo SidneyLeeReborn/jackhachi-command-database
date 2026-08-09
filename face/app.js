@@ -90,6 +90,8 @@ let jointSnapped = false;
 let jointSnappedAt = 0;
 let jointAnchorIndex = null;
 let jointDragOffset = new THREE.Vector3();
+const jointRotatePointerStart = new THREE.Vector2();
+const jointRotateEulerStart = new THREE.Euler();
 let nextSmokeAt = 0;
 let nextNoseExhaleAt = 0;
 let noseExhaleUntil = 0;
@@ -100,7 +102,6 @@ let jointSpitAt = 0;
 let jointDropping = false;
 let jointDropVelocity = 0;
 let jointDropBounces = 0;
-let jointDropSettling = false;
 const jointSpitVelocity = new THREE.Vector3();
 let alteredFace = null;
 let alteredFaceOpacity = 0;
@@ -155,8 +156,10 @@ const SPRING = 54;
 const DAMPING = 5.8;
 const JOINT_SCALE = 7;
 const JOINT_LOOSE_POSITION = new THREE.Vector3(-0.56, -0.43, 0.92);
-const JOINT_LOOSE_ROTATION = THREE.MathUtils.degToRad(-8);
 const JOINT_MOUTH_ANCHOR = new THREE.Vector3(0, -0.53, 0.55);
+const jointRestRotation = new THREE.Euler(0, 0, THREE.MathUtils.degToRad(-8));
+const jointContactFromRoot = new THREE.Vector3();
+const JOINT_CONTACT_DISTANCE = 0.55;
 const ALTERED_FACE_DELAY = 4000;
 const ALTERED_FACE_FADE_IN = 60000;
 const ALTERED_FACE_FADE_OUT = 3000;
@@ -175,8 +178,6 @@ const PAINT_HISTORY_LIMIT = 2;
 
 // Mouse placement should feel physical without demanding pixel-perfect contact.
 // This is measured from the joint's mouth end to the nearest head vertex.
-const JOINT_CONTACT_DISTANCE = 0.32;
-
 const EYE_SPECS = [
   { x: -0.196, y: 0.721, z: 0.395, offsetX: 0.043, offsetY: -0.021, offsetZ: 0.038, size: 1 },
   { x: 0.186, y: 0.723, z: 0.418, offsetX: -0.005, offsetY: -0.012, offsetZ: 0.007, size: 1 }
@@ -289,7 +290,7 @@ new GLTFLoader().load(
     });
     jointRoot.scale.setScalar(JOINT_SCALE);
     jointRoot.position.copy(JOINT_LOOSE_POSITION);
-    jointRoot.rotation.z = JOINT_LOOSE_ROTATION;
+    jointRoot.rotation.copy(jointRestRotation);
     jointRoot.visible = false;
     scene.add(jointRoot);
     jointButton.disabled = false;
@@ -939,13 +940,18 @@ function beginDrag(event) {
     const jointHit = raycaster.intersectObject(jointRoot, true)[0];
     if (jointHit) {
       event.preventDefault();
-      jointDropSettling = false;
-      if (jointSnapped) detachJoint();
+      const rotateJoint = event.button === 2 || event.shiftKey;
+      if (jointSnapped && !rotateJoint) detachJoint();
       activePointer = event.pointerId;
       canvas.setPointerCapture(event.pointerId);
       dragging = true;
-      dragMode = 'joint';
+      dragMode = rotateJoint ? 'joint-rotate' : 'joint';
       stage.classList.add('grabbing');
+      if (rotateJoint) {
+        jointRotatePointerStart.set(event.clientX, event.clientY);
+        jointRotateEulerStart.copy(jointRoot.rotation);
+        return;
+      }
       camera.getWorldDirection(cameraDirection);
       dragPlane.setFromNormalAndCoplanarPoint(cameraDirection, jointRoot.position);
       jointDragOffset.subVectors(jointRoot.position, jointHit.point);
@@ -992,6 +998,14 @@ function moveDrag(event) {
   raycaster.setFromCamera(pointer, camera);
   if (dragMode === 'paint') {
     paintAtPointer();
+    return;
+  }
+  if (dragMode === 'joint-rotate') {
+    const dx = event.clientX - jointRotatePointerStart.x;
+    const dy = event.clientY - jointRotatePointerStart.y;
+    jointRoot.rotation.x = jointRotateEulerStart.x + dy * 0.012;
+    jointRoot.rotation.y = jointRotateEulerStart.y + dx * 0.012;
+    if (jointSnapped) anchorJointContactToMouth();
     return;
   }
   if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return;
@@ -1102,11 +1116,10 @@ function toggleJointItem() {
   }
   jointRoot.visible = true;
   jointDropping = true;
-  jointDropSettling = false;
   jointDropVelocity = 0;
   jointDropBounces = 0;
   jointRoot.position.set(JOINT_LOOSE_POSITION.x, 1.65, JOINT_LOOSE_POSITION.z);
-  jointRoot.rotation.set(0, 0, JOINT_LOOSE_ROTATION);
+  jointRoot.rotation.copy(jointRestRotation);
   jointButton.setAttribute('aria-pressed', 'true');
 }
 
@@ -1134,14 +1147,21 @@ function snapJointToHeadSurface() {
 
   modelPivot.attach(jointRoot);
   jointRoot.scale.setScalar(JOINT_SCALE);
-  const contactInPivot = modelPivot.worldToLocal(contactWorld.clone());
-  const contactFromRoot = contactInPivot.sub(jointRoot.position);
-  jointRoot.position.copy(JOINT_MOUTH_ANCHOR).sub(contactFromRoot);
+  anchorJointContactToMouth();
   jointAnchorIndex = null;
   jointSnapped = true;
   jointSnappedAt = performance.now();
   nextNoseExhaleAt = jointSnappedAt + 6500;
   noseExhaleUntil = 0;
+}
+
+function anchorJointContactToMouth() {
+  if (!jointRoot || !jointContact || !modelPivot) return;
+  jointRoot.updateMatrixWorld(true);
+  const contactInPivot = modelPivot.worldToLocal(jointContact.getWorldPosition(new THREE.Vector3()));
+  jointContactFromRoot.subVectors(contactInPivot, jointRoot.position);
+  jointRoot.position.copy(JOINT_MOUTH_ANCHOR).sub(jointContactFromRoot);
+  jointRoot.updateMatrixWorld(true);
 }
 
 function detachJoint() {
@@ -1166,7 +1186,7 @@ function retireFinishedJoint() {
   if (!jointRoot || !jointVisual) return;
   scene.attach(jointRoot);
   jointRoot.position.copy(JOINT_LOOSE_POSITION);
-  jointRoot.rotation.set(0, 0, JOINT_LOOSE_ROTATION);
+  jointRoot.rotation.copy(jointRestRotation);
   jointRoot.scale.setScalar(JOINT_SCALE);
   jointVisual.scale.x = 1;
   jointVisual.position.x = 0;
@@ -1176,7 +1196,6 @@ function retireFinishedJoint() {
   }
   smokedFraction = 0;
   jointSpitting = false;
-  jointDropSettling = false;
   jointSpitAt = 0;
   jointTip.position.x = JOINT_CONTACT_X + JOINT_FULL_LENGTH;
   jointRoot.visible = false;
@@ -1257,6 +1276,16 @@ canvas.addEventListener('pointerleave', () => {
 });
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+canvas.addEventListener('wheel', (event) => {
+  if (!jointRoot?.visible || jointSpitting) return;
+  setPointer(event);
+  raycaster.setFromCamera(pointer, camera);
+  if (!raycaster.intersectObject(jointRoot, true)[0]) return;
+  event.preventDefault();
+  jointRoot.rotation.z += Math.sign(event.deltaY) * 0.12;
+  if (jointSnapped) anchorJointContactToMouth();
+}, { passive: false });
 if (resetButton) resetButton.addEventListener('click', restoreFactoryFace);
 jointButton.addEventListener('click', toggleJointItem);
 duragButton.addEventListener('click', () => {
@@ -1363,25 +1392,10 @@ function animate() {
         jointDropBounces += 1;
       } else {
         jointDropping = false;
-        jointDropSettling = true;
         eyeLookTarget.set(0, 0);
         jointDropVelocity = 0;
         jointDropBounces = 0;
       }
-    }
-  }
-
-  if (jointDropSettling && jointRoot) {
-    jointRoot.rotation.x = THREE.MathUtils.damp(jointRoot.rotation.x, 0, 9, dt);
-    jointRoot.rotation.y = THREE.MathUtils.damp(jointRoot.rotation.y, 0, 9, dt);
-    jointRoot.rotation.z = THREE.MathUtils.damp(jointRoot.rotation.z, JOINT_LOOSE_ROTATION, 9, dt);
-    if (
-      Math.abs(jointRoot.rotation.x) < 0.003 &&
-      Math.abs(jointRoot.rotation.y) < 0.003 &&
-      Math.abs(jointRoot.rotation.z - JOINT_LOOSE_ROTATION) < 0.003
-    ) {
-      jointRoot.rotation.set(0, 0, JOINT_LOOSE_ROTATION);
-      jointDropSettling = false;
     }
   }
 

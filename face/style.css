@@ -211,6 +211,8 @@ header p {
   margin: 12px 0;
 }
 
+.joint-help { color: #ffff00; font: bold 10px "MS Sans Serif", Arial, sans-serif; }
+
 button {
   padding: 7px 13px;
   border: 3px outset #ddd;
