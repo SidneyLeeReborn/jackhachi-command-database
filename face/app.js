@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 const stage = document.querySelector('#face-stage');
 const canvas = document.querySelector('#face-canvas');
@@ -25,6 +26,10 @@ const paintUndo = document.querySelector('#paint-undo');
 const paintRedo = document.querySelector('#paint-redo');
 const paintClear = document.querySelector('#paint-clear');
 const paintCursor = document.querySelector('#paint-cursor');
+const jointSnapX = document.querySelector('#joint-snap-x');
+const jointSnapY = document.querySelector('#joint-snap-y');
+const jointSnapZ = document.querySelector('#joint-snap-z');
+const jointSnapReadout = document.querySelector('#joint-snap-readout');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
@@ -66,6 +71,12 @@ const projectedTip = new THREE.Vector3();
 const eyeLook = new THREE.Vector2();
 const eyeLookTarget = new THREE.Vector2();
 const pupils = [];
+const jointTransform = new TransformControls(camera, canvas);
+jointTransform.setMode('rotate');
+jointTransform.setSpace('local');
+jointTransform.setSize(0.72);
+jointTransform.enabled = true;
+scene.add(jointTransform.getHelper());
 
 let head = null;
 let modelPivot = null;
@@ -924,6 +935,7 @@ function releaseGroan() {
 
 function beginDrag(event) {
   if (!head || activePointer !== null) return;
+  if (jointTransform.axis) return;
   setPointer(event);
   raycaster.setFromCamera(pointer, camera);
   if (paintMode) {
@@ -1111,10 +1123,12 @@ function toggleJointItem() {
   if (!jointRoot || jointSnapped || jointSpitting) return;
   if (jointRoot.visible && !jointDropping) {
     jointRoot.visible = false;
+    jointTransform.detach();
     jointButton.setAttribute('aria-pressed', 'false');
     return;
   }
   jointRoot.visible = true;
+  jointTransform.attach(jointRoot);
   jointDropping = true;
   jointDropVelocity = 0;
   jointDropBounces = 0;
@@ -1178,6 +1192,7 @@ function spitFinishedJoint(now) {
   jointSnapped = false;
   jointAnchorIndex = null;
   jointSpitting = true;
+  jointTransform.detach();
   jointSpitAt = now;
   jointSpitVelocity.set(0.48, -0.16, 0.12);
 }
@@ -1199,6 +1214,7 @@ function retireFinishedJoint() {
   jointSpitAt = 0;
   jointTip.position.x = JOINT_CONTACT_X + JOINT_FULL_LENGTH;
   jointRoot.visible = false;
+  jointTransform.detach();
   jointButton.setAttribute('aria-pressed', 'false');
 }
 
@@ -1286,6 +1302,25 @@ canvas.addEventListener('wheel', (event) => {
   jointRoot.rotation.z += Math.sign(event.deltaY) * 0.12;
   if (jointSnapped) anchorJointContactToMouth();
 }, { passive: false });
+jointTransform.addEventListener('objectChange', () => {
+  if (jointSnapped) anchorJointContactToMouth();
+});
+
+function updateJointSnapCalibration() {
+  JOINT_MOUTH_ANCHOR.set(
+    Number(jointSnapX.value),
+    Number(jointSnapY.value),
+    Number(jointSnapZ.value)
+  );
+  jointSnapX.nextElementSibling.value = JOINT_MOUTH_ANCHOR.x.toFixed(3);
+  jointSnapY.nextElementSibling.value = JOINT_MOUTH_ANCHOR.y.toFixed(3);
+  jointSnapZ.nextElementSibling.value = JOINT_MOUTH_ANCHOR.z.toFixed(3);
+  jointSnapReadout.value = `X ${JOINT_MOUTH_ANCHOR.x.toFixed(3)} | Y ${JOINT_MOUTH_ANCHOR.y.toFixed(3)} | Z ${JOINT_MOUTH_ANCHOR.z.toFixed(3)}`;
+  if (jointSnapped) anchorJointContactToMouth();
+}
+for (const input of [jointSnapX, jointSnapY, jointSnapZ]) {
+  input.addEventListener('input', updateJointSnapCalibration);
+}
 if (resetButton) resetButton.addEventListener('click', restoreFactoryFace);
 jointButton.addEventListener('click', toggleJointItem);
 duragButton.addEventListener('click', () => {
