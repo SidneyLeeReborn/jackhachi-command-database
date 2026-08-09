@@ -66,6 +66,7 @@ const jointTipWorld = new THREE.Vector3();
 const projectedTip = new THREE.Vector3();
 const eyeLook = new THREE.Vector2();
 const eyeLookTarget = new THREE.Vector2();
+const effectiveEyeLookTarget = new THREE.Vector2();
 const pupils = [];
 const jointTransform = new TransformControls(camera, canvas);
 jointTransform.setMode('rotate');
@@ -156,6 +157,12 @@ let groanTimer = null;
 let faceDragStartedAt = 0;
 let groanLoopStart = 0.25;
 let groanLoopEnd = 0.68;
+let nextBlinkAt = performance.now() + 10000;
+let blinkStartedAt = -Infinity;
+let nextIdleStateAt = performance.now() + 7000;
+let idleState = -1;
+let idleStateStartedAt = 0;
+let idleStateUntil = 0;
 
 const GRAB_RADIUS = 0.34;
 const MAX_PULL = 1.18;
@@ -1012,6 +1019,12 @@ function moveDrag(event) {
     paintAtPointer();
     return;
   }
+  if (dragMode === 'face') {
+    const headwearWalls = [];
+    if (duragEquipped && duragRoot?.visible) headwearWalls.push(duragRoot);
+    if (bandanaEquipped && bandanaRoot?.visible) headwearWalls.push(bandanaRoot);
+    if (headwearWalls.length && raycaster.intersectObjects(headwearWalls, true).length) return;
+  }
   if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) return;
 
   if (dragMode === 'joint') {
@@ -1170,11 +1183,31 @@ function snapJointToHeadSurface() {
   modelPivot.attach(jointRoot);
   jointRoot.scale.setScalar(JOINT_SCALE);
   anchorJointContactToMouth();
-  jointAnchorIndex = null;
   jointSnapped = true;
+  bindJointToMouthMesh();
   jointSnappedAt = performance.now();
   nextNoseExhaleAt = jointSnappedAt + 6500;
   noseExhaleUntil = 0;
+}
+
+function bindJointToMouthMesh() {
+  if (!head || !positions || !modelPivot || !jointRoot) return;
+  const anchorInHead = head.worldToLocal(modelPivot.localToWorld(JOINT_MOUTH_ANCHOR.clone()));
+  let nearestIndex = 0;
+  let nearestDistance = Infinity;
+  for (let i = 0; i < positions.count; i++) {
+    tempVertex.fromArray(positions.array, i * 3);
+    const distance = tempVertex.distanceToSquared(anchorInHead);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestIndex = i;
+    }
+  }
+  jointAnchorIndex = nearestIndex;
+  tempVertex.fromArray(positions.array, nearestIndex * 3);
+  head.localToWorld(tempVertex);
+  modelPivot.worldToLocal(tempVertex);
+  jointSnapOffset.subVectors(jointRoot.position, tempVertex);
 }
 
 function anchorJointContactToMouth() {
@@ -1392,6 +1425,60 @@ function animate() {
   idleTime += dt;
   entranceTime += dt;
 
+  if (now >= nextBlinkAt) {
+    blinkStartedAt = now;
+    nextBlinkAt = now + 10000;
+  }
+  const blinkAge = (now - blinkStartedAt) / 190;
+  const blinkAmount = blinkAge >= 0 && blinkAge <= 1
+    ? Math.sin(blinkAge * Math.PI)
+    : 0;
+
+  if ((dragging || jointDropping) && idleState !== -1) {
+    idleState = -1;
+    nextIdleStateAt = now + 6500;
+  } else if (!dragging && !jointDropping && idleState === -1 && now >= nextIdleStateAt) {
+    idleState = Math.floor(Math.random() * 10);
+    idleStateStartedAt = now;
+    idleStateUntil = now + 1800 + Math.random() * 1300;
+  } else if (idleState !== -1 && now >= idleStateUntil) {
+    idleState = -1;
+    nextIdleStateAt = now + 7000 + Math.random() * 7000;
+  }
+
+  let idleLookX = 0;
+  let idleLookY = 0;
+  let idleYaw = 0;
+  let idlePitch = 0;
+  let idleRoll = 0;
+  let idleBob = 0;
+  if (idleState !== -1) {
+    const duration = Math.max(1, idleStateUntil - idleStateStartedAt);
+    const progress = THREE.MathUtils.clamp((now - idleStateStartedAt) / duration, 0, 1);
+    const envelope = Math.sin(progress * Math.PI);
+    const wave = Math.sin(progress * Math.PI * 4);
+    switch (idleState) {
+      case 0: idleLookX = -0.82 * envelope; idleYaw = -0.10 * envelope; break;
+      case 1: idleLookX = 0.82 * envelope; idleYaw = 0.10 * envelope; break;
+      case 2: idleLookY = 0.78 * envelope; idlePitch = -0.07 * envelope; break;
+      case 3: idleLookY = -0.58 * envelope; idlePitch = 0.055 * envelope; break;
+      case 4: idleYaw = wave * 0.085 * envelope; idleRoll = -wave * 0.045 * envelope; break;
+      case 5: idlePitch = wave * 0.055 * envelope; idleBob = -Math.abs(wave) * 0.018 * envelope; break;
+      case 6: idleRoll = wave * 0.075 * envelope; idleLookX = wave * 0.40 * envelope; break;
+      case 7: idleBob = Math.sin(progress * Math.PI * 8) * 0.026 * envelope; break;
+      case 8:
+        idleLookX = Math.cos(progress * Math.PI * 4) * 0.62 * envelope;
+        idleLookY = Math.sin(progress * Math.PI * 4) * 0.52 * envelope;
+        idleYaw = idleLookX * 0.07;
+        break;
+      case 9: idleLookY = 0.18 * envelope; idlePitch = -0.025 * envelope; idleRoll = 0.018 * envelope; break;
+    }
+  }
+  effectiveEyeLookTarget.set(
+    THREE.MathUtils.clamp(eyeLookTarget.x + idleLookX, -1, 1),
+    THREE.MathUtils.clamp(eyeLookTarget.y + idleLookY, -1, 1)
+  );
+
   if (jointDropping && jointRoot) {
     jointDropVelocity -= 4.8 * dt;
     jointRoot.position.y += jointDropVelocity * dt;
@@ -1449,12 +1536,12 @@ function animate() {
   if (modelPivot) {
     const idleStrength = dragging ? 0.25 : 1;
     const followEase = 1 - Math.exp(-3.2 * dt);
-    turnAngle = THREE.MathUtils.lerp(turnAngle, eyeLookTarget.x * 0.384, followEase);
-    headPitch = THREE.MathUtils.lerp(headPitch, -eyeLookTarget.y * 0.154, followEase);
+    turnAngle = THREE.MathUtils.lerp(turnAngle, effectiveEyeLookTarget.x * 0.384 + idleYaw, followEase);
+    headPitch = THREE.MathUtils.lerp(headPitch, -effectiveEyeLookTarget.y * 0.154 + idlePitch, followEase);
     modelPivot.rotation.y = turnAngle;
-    modelPivot.rotation.z = (Math.sin(idleTime * 1.05) * 0.012 + Math.sin(idleTime * 0.43 + 1.8) * 0.005) * idleStrength;
+    modelPivot.rotation.z = (Math.sin(idleTime * 1.05) * 0.012 + Math.sin(idleTime * 0.43 + 1.8) * 0.005) * idleStrength + idleRoll;
     modelPivot.rotation.x = headPitch + (Math.sin(idleTime * 0.72 + 0.6) * 0.006) * idleStrength;
-    modelPivot.position.y = 0.080 + Math.sin(idleTime * 0.92) * 0.010 * idleStrength;
+    modelPivot.position.y = 0.080 + Math.sin(idleTime * 0.92) * 0.010 * idleStrength + idleBob;
 
     // Squashy late-90s blob entrance: rapidly grows in, overshoots, then
     // settles into the normal idle motion without hiding interactivity.
@@ -1604,7 +1691,7 @@ function animate() {
     positions.needsUpdate = true;
   }
 
-  eyeLook.lerp(eyeLookTarget, 1 - Math.exp(-10 * dt));
+  eyeLook.lerp(effectiveEyeLookTarget, 1 - Math.exp(-10 * dt));
   for (const eye of pupils) {
     const index = eye.anchor * 3;
     tempVertex.fromArray(positions.array, index);
@@ -1613,7 +1700,11 @@ function animate() {
     eye.group.position.y += eye.offsetY;
     eye.group.position.z += eye.offsetZ;
     eye.group.quaternion.identity();
-    eye.group.scale.set(eye.size, eye.size * (1 - smileAmount * 0.20), eye.size);
+    eye.group.scale.set(
+      eye.size,
+      eye.size * (1 - smileAmount * 0.20) * THREE.MathUtils.lerp(1, 0.055, blinkAmount),
+      eye.size
+    );
     const headTurnLook = -Math.sin(turnAngle) * 0.020;
     const lookX = THREE.MathUtils.clamp(eyeLook.x * 0.016 + headTurnLook, -0.026, 0.026);
     const lookY = eyeLook.y * 0.007;
