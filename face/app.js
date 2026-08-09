@@ -254,6 +254,12 @@ new GLTFLoader().load(
       const materials = Array.isArray(head.material) ? head.material : [head.material];
       for (const material of materials) {
         material.map = normalTexture;
+        // Keep the sculpt readable without the wet/plastic showroom gloss.
+        if ('roughness' in material) material.roughness = 0.78;
+        if ('metalness' in material) material.metalness = 0;
+        if ('envMapIntensity' in material) material.envMapIntensity = 0.38;
+        if ('clearcoat' in material) material.clearcoat = 0;
+        if ('specularIntensity' in material) material.specularIntensity = 0.42;
         material.needsUpdate = true;
       }
 
