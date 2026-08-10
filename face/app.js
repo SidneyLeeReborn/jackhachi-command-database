@@ -172,6 +172,9 @@ let motionSensorsInstalled = false;
 let motionPermissionRequested = false;
 let motionReferenceBeta = null;
 let motionReferenceGamma = null;
+let motionPreviousBeta = null;
+let motionPreviousGamma = null;
+let lastOrientationMovementAt = 0;
 let motionTargetYaw = 0;
 let motionTargetPitch = 0;
 let motionTargetRoll = 0;
@@ -213,8 +216,10 @@ const GROAN_CHANCE = 0.18;
 const PAINT_TEXTURE_SIZE = 1024;
 const PAINT_SIZE_SCALE = PAINT_TEXTURE_SIZE / 2048;
 const PAINT_HISTORY_LIMIT = 2;
-const MOTION_TILT_LIMIT = THREE.MathUtils.degToRad(12);
-const MOTION_PITCH_LIMIT = THREE.MathUtils.degToRad(9);
+const MOTION_TILT_LIMIT = THREE.MathUtils.degToRad(7);
+const MOTION_PITCH_LIMIT = THREE.MathUtils.degToRad(5);
+const MOTION_DEAD_ZONE = 5;
+const MOTION_SETTLE_DELAY = 900;
 
 // Mouse placement should feel physical without demanding pixel-perfect contact.
 // This is measured from the joint's mouth end to the nearest head vertex.
@@ -1425,10 +1430,23 @@ function wrappedAngleDifference(value, reference) {
 function resetMotionReference() {
   motionReferenceBeta = null;
   motionReferenceGamma = null;
+  motionPreviousBeta = null;
+  motionPreviousGamma = null;
+  lastOrientationMovementAt = performance.now();
   motionTargetYaw = 0;
   motionTargetPitch = 0;
   motionTargetRoll = 0;
   motionLookTarget.set(0, 0);
+}
+
+function bufferedMotionAmount(value, fullRange) {
+  const magnitude = Math.abs(value);
+  if (magnitude <= MOTION_DEAD_ZONE) return 0;
+  return Math.sign(value) * THREE.MathUtils.clamp(
+    (magnitude - MOTION_DEAD_ZONE) / (fullRange - MOTION_DEAD_ZONE),
+    0,
+    1
+  );
 }
 
 function handleDeviceOrientation(event) {
@@ -1436,7 +1454,27 @@ function handleDeviceOrientation(event) {
   if (motionReferenceBeta === null || motionReferenceGamma === null) {
     motionReferenceBeta = event.beta;
     motionReferenceGamma = event.gamma;
+    motionPreviousBeta = event.beta;
+    motionPreviousGamma = event.gamma;
+    lastOrientationMovementAt = performance.now();
     return;
+  }
+
+
+  const now = performance.now();
+  const frameMovement = Math.max(
+    Math.abs(wrappedAngleDifference(event.beta, motionPreviousBeta ?? event.beta)),
+    Math.abs(wrappedAngleDifference(event.gamma, motionPreviousGamma ?? event.gamma))
+  );
+  motionPreviousBeta = event.beta;
+  motionPreviousGamma = event.gamma;
+  if (frameMovement > 0.55) lastOrientationMovementAt = now;
+
+  // Once the phone has rested for a moment, gently make that position neutral.
+  // This prevents a phone lying on a table from leaving Jackhachi staring upward.
+  if (now - lastOrientationMovementAt >= MOTION_SETTLE_DELAY) {
+    motionReferenceBeta += wrappedAngleDifference(event.beta, motionReferenceBeta) * 0.075;
+    motionReferenceGamma += wrappedAngleDifference(event.gamma, motionReferenceGamma) * 0.075;
   }
 
   let horizontal = wrappedAngleDifference(event.gamma, motionReferenceGamma);
@@ -1453,12 +1491,12 @@ function handleDeviceOrientation(event) {
     vertical *= -1;
   }
 
-  const horizontalAmount = THREE.MathUtils.clamp(horizontal / 32, -1, 1);
-  const verticalAmount = THREE.MathUtils.clamp(vertical / 34, -1, 1);
+  const horizontalAmount = bufferedMotionAmount(horizontal, 34);
+  const verticalAmount = bufferedMotionAmount(vertical, 38);
   motionTargetYaw = horizontalAmount * MOTION_TILT_LIMIT;
-  motionTargetRoll = -horizontalAmount * MOTION_TILT_LIMIT * 0.78;
+  motionTargetRoll = -horizontalAmount * MOTION_TILT_LIMIT * 0.68;
   motionTargetPitch = verticalAmount * MOTION_PITCH_LIMIT;
-  motionLookTarget.set(horizontalAmount * 0.58, -verticalAmount * 0.45);
+  motionLookTarget.set(horizontalAmount * 0.34, -verticalAmount * 0.26);
 }
 
 function handleDeviceMotion(event) {
@@ -1474,18 +1512,18 @@ function handleDeviceMotion(event) {
     Number.isFinite(rotation?.gamma) ? rotation.gamma : 0
   );
   const now = performance.now();
-  if ((accelerationMagnitude < 5.5 && rotationMagnitude < 155) || now - lastMotionKickAt < 180) return;
+  if ((accelerationMagnitude < 7.5 && rotationMagnitude < 210) || now - lastMotionKickAt < 260) return;
 
   const strength = THREE.MathUtils.clamp(
-    Math.max(accelerationMagnitude / 13, rotationMagnitude / 420),
-    0.35,
-    1.25
+    Math.max(accelerationMagnitude / 16, rotationMagnitude / 520),
+    0.25,
+    0.85
   );
   const horizontalDirection = Math.abs(ax) > 0.35 ? Math.sign(ax) : (Math.random() < 0.5 ? -1 : 1);
   const verticalDirection = Math.abs(ay) > 0.35 ? Math.sign(ay) : (Math.random() < 0.5 ? -1 : 1);
-  motionKickVelocity.x += -verticalDirection * strength * 0.55;
-  motionKickVelocity.y += horizontalDirection * strength * 0.72;
-  motionKickVelocity.z += -horizontalDirection * strength * 0.48;
+  motionKickVelocity.x += -verticalDirection * strength * 0.32;
+  motionKickVelocity.y += horizontalDirection * strength * 0.42;
+  motionKickVelocity.z += -horizontalDirection * strength * 0.28;
   lastMotionKickAt = now;
 }
 
