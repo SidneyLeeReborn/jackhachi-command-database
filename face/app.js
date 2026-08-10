@@ -168,6 +168,21 @@ let nextIdleStateAt = performance.now() + 9000;
 let idleState = -1;
 let idleStateStartedAt = 0;
 let idleStateUntil = 0;
+let motionSensorsInstalled = false;
+let motionPermissionRequested = false;
+let motionReferenceBeta = null;
+let motionReferenceGamma = null;
+let motionTargetYaw = 0;
+let motionTargetPitch = 0;
+let motionTargetRoll = 0;
+let motionYaw = 0;
+let motionPitch = 0;
+let motionRoll = 0;
+const motionLookTarget = new THREE.Vector2();
+const motionLook = new THREE.Vector2();
+const motionKick = new THREE.Vector3();
+const motionKickVelocity = new THREE.Vector3();
+let lastMotionKickAt = 0;
 
 const GRAB_RADIUS = 0.34;
 const MAX_PULL = 1.18;
@@ -198,6 +213,8 @@ const GROAN_CHANCE = 0.18;
 const PAINT_TEXTURE_SIZE = 1024;
 const PAINT_SIZE_SCALE = PAINT_TEXTURE_SIZE / 2048;
 const PAINT_HISTORY_LIMIT = 2;
+const MOTION_TILT_LIMIT = THREE.MathUtils.degToRad(12);
+const MOTION_PITCH_LIMIT = THREE.MathUtils.degToRad(9);
 
 // Mouse placement should feel physical without demanding pixel-perfect contact.
 // This is measured from the joint's mouth end to the nearest head vertex.
@@ -1401,7 +1418,119 @@ function restoreFactoryFace() {
   for (const material of jointInhaleMaterials) material.opacity = 0;
 }
 
+function wrappedAngleDifference(value, reference) {
+  return ((value - reference + 540) % 360) - 180;
+}
+
+function resetMotionReference() {
+  motionReferenceBeta = null;
+  motionReferenceGamma = null;
+  motionTargetYaw = 0;
+  motionTargetPitch = 0;
+  motionTargetRoll = 0;
+  motionLookTarget.set(0, 0);
+}
+
+function handleDeviceOrientation(event) {
+  if (!Number.isFinite(event.beta) || !Number.isFinite(event.gamma)) return;
+  if (motionReferenceBeta === null || motionReferenceGamma === null) {
+    motionReferenceBeta = event.beta;
+    motionReferenceGamma = event.gamma;
+    return;
+  }
+
+  let horizontal = wrappedAngleDifference(event.gamma, motionReferenceGamma);
+  let vertical = wrappedAngleDifference(event.beta, motionReferenceBeta);
+  const screenAngle = window.screen?.orientation?.angle
+    ?? window.orientation
+    ?? 0;
+  if (Math.abs(screenAngle) === 90) {
+    const previousHorizontal = horizontal;
+    horizontal = screenAngle > 0 ? vertical : -vertical;
+    vertical = screenAngle > 0 ? -previousHorizontal : previousHorizontal;
+  } else if (Math.abs(screenAngle) === 180) {
+    horizontal *= -1;
+    vertical *= -1;
+  }
+
+  const horizontalAmount = THREE.MathUtils.clamp(horizontal / 32, -1, 1);
+  const verticalAmount = THREE.MathUtils.clamp(vertical / 34, -1, 1);
+  motionTargetYaw = horizontalAmount * MOTION_TILT_LIMIT;
+  motionTargetRoll = -horizontalAmount * MOTION_TILT_LIMIT * 0.78;
+  motionTargetPitch = verticalAmount * MOTION_PITCH_LIMIT;
+  motionLookTarget.set(horizontalAmount * 0.58, -verticalAmount * 0.45);
+}
+
+function handleDeviceMotion(event) {
+  const acceleration = event.acceleration;
+  const rotation = event.rotationRate;
+  const ax = Number.isFinite(acceleration?.x) ? acceleration.x : 0;
+  const ay = Number.isFinite(acceleration?.y) ? acceleration.y : 0;
+  const az = Number.isFinite(acceleration?.z) ? acceleration.z : 0;
+  const accelerationMagnitude = Math.hypot(ax, ay, az);
+  const rotationMagnitude = Math.hypot(
+    Number.isFinite(rotation?.alpha) ? rotation.alpha : 0,
+    Number.isFinite(rotation?.beta) ? rotation.beta : 0,
+    Number.isFinite(rotation?.gamma) ? rotation.gamma : 0
+  );
+  const now = performance.now();
+  if ((accelerationMagnitude < 5.5 && rotationMagnitude < 155) || now - lastMotionKickAt < 180) return;
+
+  const strength = THREE.MathUtils.clamp(
+    Math.max(accelerationMagnitude / 13, rotationMagnitude / 420),
+    0.35,
+    1.25
+  );
+  const horizontalDirection = Math.abs(ax) > 0.35 ? Math.sign(ax) : (Math.random() < 0.5 ? -1 : 1);
+  const verticalDirection = Math.abs(ay) > 0.35 ? Math.sign(ay) : (Math.random() < 0.5 ? -1 : 1);
+  motionKickVelocity.x += -verticalDirection * strength * 0.55;
+  motionKickVelocity.y += horizontalDirection * strength * 0.72;
+  motionKickVelocity.z += -horizontalDirection * strength * 0.48;
+  lastMotionKickAt = now;
+}
+
+function installMotionSensors() {
+  if (motionSensorsInstalled) return;
+  motionSensorsInstalled = true;
+  window.addEventListener('deviceorientation', handleDeviceOrientation, { passive: true });
+  window.addEventListener('devicemotion', handleDeviceMotion, { passive: true });
+  window.addEventListener('orientationchange', resetMotionReference, { passive: true });
+  window.screen?.orientation?.addEventListener?.('change', resetMotionReference);
+}
+
+async function requestMotionSensorsFromGesture() {
+  if (motionSensorsInstalled || motionPermissionRequested) return;
+  motionPermissionRequested = true;
+  const requests = [];
+  if (typeof window.DeviceOrientationEvent?.requestPermission === 'function') {
+    requests.push(window.DeviceOrientationEvent.requestPermission());
+  }
+  if (typeof window.DeviceMotionEvent?.requestPermission === 'function') {
+    requests.push(window.DeviceMotionEvent.requestPermission());
+  }
+  if (!requests.length) {
+    installMotionSensors();
+    return;
+  }
+  try {
+    const results = await Promise.allSettled(requests);
+    if (results.some((result) => result.status === 'fulfilled' && result.value === 'granted')) {
+      installMotionSensors();
+    }
+  } catch {
+    // Unsupported or denied sensors simply leave the original controls intact.
+  }
+}
+
+const likelyTouchDevice = navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches;
+if (likelyTouchDevice) {
+  const orientationNeedsPermission = typeof window.DeviceOrientationEvent?.requestPermission === 'function';
+  const motionNeedsPermission = typeof window.DeviceMotionEvent?.requestPermission === 'function';
+  if (!orientationNeedsPermission && !motionNeedsPermission) installMotionSensors();
+}
+
 canvas.addEventListener('pointerdown', beginDrag);
+canvas.addEventListener('pointerdown', requestMotionSensorsFromGesture, { once: true });
 let pendingPaintCursorEvent = null;
 let paintCursorFrameQueued = false;
 function schedulePaintCursorUpdate(event) {
@@ -1587,9 +1716,21 @@ function animate(frameTime = performance.now()) {
     }
   }
   effectiveEyeLookTarget.set(
-    THREE.MathUtils.clamp(eyeLookTarget.x + idleLookX, -1, 1),
-    THREE.MathUtils.clamp(eyeLookTarget.y + idleLookY, -1, 1)
+    THREE.MathUtils.clamp(eyeLookTarget.x + idleLookX + motionLook.x, -1, 1),
+    THREE.MathUtils.clamp(eyeLookTarget.y + idleLookY + motionLook.y, -1, 1)
   );
+
+  const motionEase = 1 - Math.exp(-5.2 * dt);
+  motionYaw = THREE.MathUtils.lerp(motionYaw, motionTargetYaw, motionEase);
+  motionPitch = THREE.MathUtils.lerp(motionPitch, motionTargetPitch, motionEase);
+  motionRoll = THREE.MathUtils.lerp(motionRoll, motionTargetRoll, motionEase);
+  motionLook.lerp(motionLookTarget, motionEase);
+  motionKickVelocity.addScaledVector(motionKick, -20 * dt);
+  motionKickVelocity.multiplyScalar(Math.exp(-6.2 * dt));
+  motionKick.addScaledVector(motionKickVelocity, dt);
+  motionKick.x = THREE.MathUtils.clamp(motionKick.x, -0.18, 0.18);
+  motionKick.y = THREE.MathUtils.clamp(motionKick.y, -0.22, 0.22);
+  motionKick.z = THREE.MathUtils.clamp(motionKick.z, -0.18, 0.18);
 
   if (jointDropping && jointRoot) {
     jointDropVelocity -= 4.8 * dt;
@@ -1649,11 +1790,11 @@ function animate(frameTime = performance.now()) {
   if (modelPivot) {
     const idleStrength = dragging ? 0.25 : 1;
     const followEase = 1 - Math.exp(-3.2 * dt);
-    turnAngle = THREE.MathUtils.lerp(turnAngle, effectiveEyeLookTarget.x * 0.384 + idleYaw, followEase);
-    headPitch = THREE.MathUtils.lerp(headPitch, -effectiveEyeLookTarget.y * 0.154 + idlePitch, followEase);
-    modelPivot.rotation.y = turnAngle;
-    modelPivot.rotation.z = (Math.sin(idleTime * 1.05) * 0.012 + Math.sin(idleTime * 0.43 + 1.8) * 0.005) * idleStrength + idleRoll;
-    modelPivot.rotation.x = headPitch + (Math.sin(idleTime * 0.72 + 0.6) * 0.006) * idleStrength;
+    turnAngle = THREE.MathUtils.lerp(turnAngle, effectiveEyeLookTarget.x * 0.384 + idleYaw + motionYaw, followEase);
+    headPitch = THREE.MathUtils.lerp(headPitch, -effectiveEyeLookTarget.y * 0.154 + idlePitch + motionPitch, followEase);
+    modelPivot.rotation.y = turnAngle + motionKick.y;
+    modelPivot.rotation.z = (Math.sin(idleTime * 1.05) * 0.012 + Math.sin(idleTime * 0.43 + 1.8) * 0.005) * idleStrength + idleRoll + motionRoll + motionKick.z;
+    modelPivot.rotation.x = headPitch + (Math.sin(idleTime * 0.72 + 0.6) * 0.006) * idleStrength + motionKick.x;
     modelPivot.position.y = 0.080 + Math.sin(idleTime * 0.92) * 0.010 * idleStrength + idleBob;
 
     // Squashy late-90s blob entrance: rapidly grows in, overshoots, then
